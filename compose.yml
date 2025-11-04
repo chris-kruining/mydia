@@ -1,0 +1,55 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: mydia_dev
+    environment:
+      # Phoenix configuration
+      PHX_HOST: localhost
+      PORT: 4000
+      SECRET_KEY_BASE: "VlPUd2fbnWjh6Di+7SGc2SSXpNhI0hN766FFAlct65wU5ARyiGvK9r3TqSqKyu0K"
+
+      # Database configuration (SQLite)
+      DATABASE_PATH: /app/mydia_dev.db
+
+      # Mix environment
+      MIX_ENV: dev
+
+      # For interactive debugging
+      MIX_HOME: /app/.mix
+      HEX_HOME: /app/.hex
+    ports:
+      - "4000:4000"
+    volumes:
+      # Mount source code for live reloading
+      - .:/app
+
+      # Persist build artifacts and dependencies across restarts
+      - build_cache:/app/_build
+      - deps_cache:/app/deps
+      - mix_cache:/app/.mix
+      - hex_cache:/app/.hex
+      - node_modules:/app/assets/node_modules
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000"]
+      interval: 30s
+      timeout: 3s
+      start_period: 40s
+      retries: 3
+
+volumes:
+  # Named volumes for caching
+  build_cache:
+    driver: local
+  deps_cache:
+    driver: local
+  mix_cache:
+    driver: local
+  hex_cache:
+    driver: local
+  node_modules:
+    driver: local
