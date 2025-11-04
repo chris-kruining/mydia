@@ -300,7 +300,8 @@ defmodule Mydia.Metadata.Provider.Relay do
           episode_run_time: data["episode_run_time"],
           first_air_date: parse_date(data["first_air_date"]),
           last_air_date: parse_date(data["last_air_date"]),
-          in_production: data["in_production"]
+          in_production: data["in_production"],
+          seasons: parse_seasons_list(data["seasons"])
         })
 
       :movie ->
@@ -343,6 +344,7 @@ defmodule Mydia.Metadata.Provider.Relay do
 
   defp parse_episode(episode) do
     %{
+      season_number: episode["season_number"],
       episode_number: episode["episode_number"],
       name: episode["name"],
       overview: episode["overview"],
@@ -418,6 +420,23 @@ defmodule Mydia.Metadata.Provider.Relay do
   defp parse_names(nil), do: []
   defp parse_names(items) when is_list(items), do: Enum.map(items, & &1["name"])
   defp parse_names(_), do: []
+
+  defp parse_seasons_list(nil), do: []
+
+  defp parse_seasons_list(seasons) when is_list(seasons) do
+    Enum.map(seasons, fn season ->
+      %{
+        season_number: season["season_number"],
+        name: season["name"],
+        overview: season["overview"],
+        air_date: season["air_date"],
+        episode_count: season["episode_count"],
+        poster_path: season["poster_path"]
+      }
+    end)
+  end
+
+  defp parse_seasons_list(_), do: []
 
   defp parse_country_codes(nil), do: []
 

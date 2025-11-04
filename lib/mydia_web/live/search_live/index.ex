@@ -21,6 +21,18 @@ defmodule MydiaWeb.SearchLive.Index do
      |> assign(:quality_filter, nil)
      |> assign(:sort_by, :quality)
      |> assign(:results_empty?, false)
+     |> assign(:show_disambiguation_modal, false)
+     |> assign(:metadata_matches, [])
+     |> assign(:metadata_media_type, nil)
+     |> assign(:pending_parsed, nil)
+     |> assign(:pending_release_title, nil)
+     |> assign(:pending_download_url, nil)
+     |> assign(:should_download_after_add, false)
+     |> assign(:show_manual_search_modal, false)
+     |> assign(:manual_search_query, "")
+     |> assign(:failed_release_title, nil)
+     |> assign(:show_retry_modal, false)
+     |> assign(:retry_error_message, nil)
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -115,19 +127,141 @@ defmodule MydiaWeb.SearchLive.Index do
      |> apply_sort()}
   end
 
-  def handle_event("download", %{"url" => _download_url, "title" => title}, socket) do
-    # TODO: Implement download functionality
-    # For now, just show a flash message
-    {:noreply,
-     socket
-     |> put_flash(:info, "Download functionality coming soon: #{title}")}
-  end
+  def handle_event("add_to_library", %{"title" => title} = params, socket) do
+    # Store download URL if provided for later use
+    download_url = Map.get(params, "download_url")
+    should_download = Map.get(params, "download", "false") == "true"
 
-  def handle_event("add_to_library", %{"title" => title}, socket) do
     # Start async task to add media to library
     {:noreply,
      socket
+     |> assign(:pending_release_title, title)
+     |> assign(:pending_download_url, download_url)
+     |> assign(:should_download_after_add, should_download)
      |> start_async(:add_to_library, fn -> add_release_to_library(title) end)}
+  end
+
+  def handle_event("select_metadata_match", %{"match_id" => match_id}, socket) do
+    # Find the selected match
+    selected_match =
+      Enum.find(socket.assigns.metadata_matches, fn m -> to_string(m["id"]) == match_id end)
+
+    if selected_match do
+      # Fetch full metadata and create media item
+      media_type = socket.assigns.metadata_media_type
+      parsed = socket.assigns.pending_parsed
+
+      {:noreply,
+       socket
+       |> assign(:show_disambiguation_modal, false)
+       |> start_async(:finalize_add_to_library, fn ->
+         config = Metadata.default_relay_config()
+
+         case fetch_full_metadata(config, selected_match, media_type) do
+           {:ok, metadata} ->
+             create_media_item_from_metadata(parsed, metadata)
+
+           error ->
+             error
+         end
+       end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_disambiguation_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_disambiguation_modal, false)
+     |> assign(:metadata_matches, [])
+     |> assign(:pending_parsed, nil)}
+  end
+
+  def handle_event("manual_search_submit", %{"search_query" => query}, socket) do
+    media_type = Map.get(socket.assigns, :manual_search_media_type, :movie)
+
+    {:noreply,
+     socket
+     |> start_async(:manual_metadata_search, fn ->
+       config = Metadata.default_relay_config()
+       Metadata.search(config, query, media_type: media_type)
+     end)}
+  end
+
+  def handle_event("close_manual_search_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_manual_search_modal, false)
+     |> assign(:failed_release_title, nil)
+     |> assign(:manual_search_query, "")}
+  end
+
+  def handle_event(
+        "select_manual_match",
+        %{"match_id" => match_id, "media_type" => media_type},
+        socket
+      ) do
+    # Find the selected match from manual search
+    selected_match =
+      Enum.find(socket.assigns.metadata_matches, fn m -> to_string(m["id"]) == match_id end)
+
+    if selected_match do
+      media_type_atom = String.to_existing_atom(media_type)
+
+      {:noreply,
+       socket
+       |> assign(:show_manual_search_modal, false)
+       |> start_async(:finalize_manual_add, fn ->
+         config = Metadata.default_relay_config()
+
+         case fetch_full_metadata(config, selected_match, media_type_atom) do
+           {:ok, metadata} ->
+             # Create media item without parsed data (since parsing failed)
+             attrs = build_media_item_attrs_from_metadata_only(metadata, media_type_atom)
+             Media.create_media_item(attrs)
+
+           error ->
+             error
+         end
+       end)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("retry_add_to_library", _params, socket) do
+    # Retry adding to library with the same parameters
+    release_title = socket.assigns.pending_release_title
+
+    if release_title do
+      Logger.info("Retrying add to library for: #{release_title}")
+
+      {:noreply,
+       socket
+       |> assign(:show_retry_modal, false)
+       |> start_async(:add_to_library, fn -> add_release_to_library(release_title) end)}
+    else
+      {:noreply,
+       socket
+       |> assign(:show_retry_modal, false)
+       |> put_flash(:error, "Cannot retry: missing release information")}
+    end
+  end
+
+  def handle_event("close_retry_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_retry_modal, false)
+     |> assign(:retry_error_message, nil)}
+  end
+
+  @impl true
+  def handle_info({:trigger_download, download_url, title}, socket) do
+    # This will be called after adding to library if download was requested
+    # Currently just logs, but will integrate with actual download functionality
+    Logger.info("Download triggered for: #{title} from #{download_url}")
+    {:noreply, socket}
   end
 
   @impl true
@@ -170,8 +304,133 @@ defmodule MydiaWeb.SearchLive.Index do
      |> put_flash(:error, "Search failed unexpectedly")}
   end
 
+  def handle_async(
+        :add_to_library,
+        {:ok, {:ok, {:needs_disambiguation, parsed, matches, media_type}}},
+        socket
+      ) do
+    Logger.info("Multiple metadata matches found, showing disambiguation modal")
+
+    {:noreply,
+     socket
+     |> assign(:show_disambiguation_modal, true)
+     |> assign(:metadata_matches, matches)
+     |> assign(:metadata_media_type, media_type)
+     |> assign(:pending_parsed, parsed)}
+  end
+
   def handle_async(:add_to_library, {:ok, {:ok, media_item}}, socket) do
     Logger.info("Successfully added #{media_item.title} to library")
+
+    socket =
+      if socket.assigns.should_download_after_add && socket.assigns.pending_download_url do
+        Logger.info("Triggering download for #{media_item.title}")
+        # Trigger download - this will be handled by the download event
+        send(self(), {:trigger_download, socket.assigns.pending_download_url, media_item.title})
+
+        socket
+        |> put_flash(:info, "#{media_item.title} added to library and download started")
+      else
+        socket
+        |> put_flash(:info, "#{media_item.title} added to library")
+      end
+
+    {:noreply,
+     socket
+     |> push_navigate(to: ~p"/media/#{media_item.id}")}
+  end
+
+  def handle_async(:add_to_library, {:ok, {:error, reason}}, socket) do
+    Logger.error("Failed to add to library: #{inspect(reason)}")
+
+    case reason do
+      :parse_failed ->
+        # Show manual search modal for parse failures
+        release_title = socket.assigns.pending_release_title || "Unknown"
+
+        {:noreply,
+         socket
+         |> assign(:show_manual_search_modal, true)
+         |> assign(:failed_release_title, release_title)
+         |> assign(:manual_search_query, extract_search_hint(release_title))}
+
+      :no_metadata_match ->
+        # Also show manual search modal for no matches
+        release_title = socket.assigns.pending_release_title || "Unknown"
+
+        {:noreply,
+         socket
+         |> assign(:show_manual_search_modal, true)
+         |> assign(:failed_release_title, release_title)
+         |> assign(:manual_search_query, extract_search_hint(release_title))
+         |> put_flash(:error, "Could not find matching media automatically")}
+
+      {:metadata_error, msg} ->
+        # Show retry modal for metadata errors
+        {:noreply,
+         socket
+         |> assign(:show_retry_modal, true)
+         |> assign(:retry_error_message, "Metadata provider error: #{msg}")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Failed to add to library: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_async(:add_to_library, {:exit, reason}, socket) do
+    Logger.error("Add to library task crashed: #{inspect(reason)}")
+
+    {:noreply, put_flash(socket, :error, "Failed to add to library unexpectedly")}
+  end
+
+  def handle_async(:finalize_add_to_library, {:ok, {:ok, media_item}}, socket) do
+    Logger.info("Successfully added #{media_item.title} to library after disambiguation")
+
+    socket =
+      if socket.assigns.should_download_after_add && socket.assigns.pending_download_url do
+        Logger.info("Triggering download for #{media_item.title}")
+        send(self(), {:trigger_download, socket.assigns.pending_download_url, media_item.title})
+
+        socket
+        |> put_flash(:info, "#{media_item.title} added to library and download started")
+      else
+        socket
+        |> put_flash(:info, "#{media_item.title} added to library")
+      end
+
+    {:noreply,
+     socket
+     |> push_navigate(to: ~p"/media/#{media_item.id}")}
+  end
+
+  def handle_async(:finalize_add_to_library, {:ok, {:error, reason}}, socket) do
+    Logger.error("Failed to add to library after disambiguation: #{inspect(reason)}")
+
+    {:noreply, put_flash(socket, :error, "Failed to add to library: #{inspect(reason)}")}
+  end
+
+  def handle_async(:finalize_add_to_library, {:exit, reason}, socket) do
+    Logger.error("Finalize add to library task crashed: #{inspect(reason)}")
+
+    {:noreply, put_flash(socket, :error, "Failed to add to library unexpectedly")}
+  end
+
+  def handle_async(:manual_metadata_search, {:ok, {:ok, results}}, socket) do
+    Logger.info("Manual metadata search returned #{length(results)} results")
+
+    {:noreply,
+     socket
+     |> assign(:metadata_matches, results)}
+  end
+
+  def handle_async(:manual_metadata_search, {:ok, {:error, reason}}, socket) do
+    Logger.error("Manual metadata search failed: #{inspect(reason)}")
+
+    {:noreply, put_flash(socket, :error, "Search failed: #{inspect(reason)}")}
+  end
+
+  def handle_async(:finalize_manual_add, {:ok, {:ok, media_item}}, socket) do
+    Logger.info("Successfully added #{media_item.title} to library via manual search")
 
     {:noreply,
      socket
@@ -179,31 +438,10 @@ defmodule MydiaWeb.SearchLive.Index do
      |> push_navigate(to: ~p"/media/#{media_item.id}")}
   end
 
-  def handle_async(:add_to_library, {:ok, {:error, reason}}, socket) do
-    Logger.error("Failed to add to library: #{inspect(reason)}")
+  def handle_async(:finalize_manual_add, {:ok, {:error, reason}}, socket) do
+    Logger.error("Failed to add to library via manual search: #{inspect(reason)}")
 
-    error_message =
-      case reason do
-        :no_metadata_match ->
-          "Could not find matching media. Try searching manually."
-
-        :parse_failed ->
-          "Could not parse release title. Try adding media manually."
-
-        {:metadata_error, msg} ->
-          "Metadata provider error: #{msg}"
-
-        _ ->
-          "Failed to add to library: #{inspect(reason)}"
-      end
-
-    {:noreply, put_flash(socket, :error, error_message)}
-  end
-
-  def handle_async(:add_to_library, {:exit, reason}, socket) do
-    Logger.error("Add to library task crashed: #{inspect(reason)}")
-
-    {:noreply, put_flash(socket, :error, "Failed to add to library unexpectedly")}
+    {:noreply, put_flash(socket, :error, "Failed to add to library: #{inspect(reason)}")}
   end
 
   ## Private Functions
@@ -358,9 +596,16 @@ defmodule MydiaWeb.SearchLive.Index do
     Logger.info("Adding release to library: #{title}")
 
     with {:ok, parsed} <- parse_release_title(title),
-         {:ok, metadata} <- search_and_fetch_metadata(parsed),
-         {:ok, media_item} <- create_media_item_from_metadata(parsed, metadata) do
-      {:ok, media_item}
+         {:ok, metadata_or_matches} <- search_and_fetch_metadata(parsed) do
+      case metadata_or_matches do
+        {:multiple_matches, matches, media_type} ->
+          # Return the matches to trigger disambiguation in the UI
+          {:ok, {:needs_disambiguation, parsed, matches, media_type}}
+
+        metadata ->
+          # Single match, create media item directly
+          create_media_item_from_metadata(parsed, metadata)
+      end
     else
       {:error, _reason} = error -> error
     end
@@ -409,10 +654,18 @@ defmodule MydiaWeb.SearchLive.Index do
         Logger.warning("No metadata matches found for: #{parsed.title}")
         {:error, :no_metadata_match}
 
-      {:ok, [first_match | _rest]} ->
-        Logger.info("Found metadata match: #{first_match["title"] || first_match["name"]}")
-        # Fetch full metadata for the first match
-        fetch_full_metadata(config, first_match, media_type)
+      {:ok, [single_match]} ->
+        # Only one match, fetch it directly
+        Logger.info(
+          "Found single metadata match: #{single_match["title"] || single_match["name"]}"
+        )
+
+        fetch_full_metadata(config, single_match, media_type)
+
+      {:ok, matches} when length(matches) > 1 ->
+        # Multiple matches, return them for disambiguation
+        Logger.info("Found #{length(matches)} metadata matches, requires disambiguation")
+        {:ok, {:multiple_matches, matches, media_type}}
 
       {:error, reason} ->
         Logger.error("Metadata search failed: #{inspect(reason)}")
@@ -526,4 +779,40 @@ defmodule MydiaWeb.SearchLive.Index do
   end
 
   defp extract_year_from_date(_), do: nil
+
+  defp extract_search_hint(release_title) do
+    # Try to extract a reasonable search query from the release title
+    # Remove common release tags and patterns
+    release_title
+    |> String.replace(
+      ~r/\b(720p|1080p|2160p|4k|WEB-?DL|BluRay|HDTV|x264|x265|HEVC|AAC|DTS)\b/i,
+      ""
+    )
+    |> String.replace(~r/\b(S\d{1,2}E\d{1,2})\b/i, "")
+    |> String.replace(~r/\b(\d{4})\b/, "")
+    |> String.replace(~r/[\.\-_]+/, " ")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+
+  defp build_media_item_attrs_from_metadata_only(metadata, media_type) do
+    type =
+      case media_type do
+        :movie -> "movie"
+        :tv_show -> "tv_show"
+        _ -> "movie"
+      end
+
+    %{
+      type: type,
+      title: metadata["title"] || metadata["name"],
+      original_title: metadata["original_title"] || metadata["original_name"],
+      year:
+        (metadata["release_date"] && extract_year_from_date(metadata["release_date"])) ||
+          (metadata["first_air_date"] && extract_year_from_date(metadata["first_air_date"])),
+      tmdb_id: metadata["id"],
+      metadata: metadata,
+      monitored: true
+    }
+  end
 end
