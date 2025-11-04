@@ -80,6 +80,81 @@ defmodule Mydia.Media do
     MediaItem.changeset(media_item, attrs)
   end
 
+  @doc """
+  Updates the monitored status for multiple media items.
+
+  Returns `{:ok, count}` where count is the number of updated items,
+  or `{:error, reason}` if the transaction fails.
+  """
+  def update_media_items_monitored(ids, monitored) when is_list(ids) do
+    Repo.transaction(fn ->
+      MediaItem
+      |> where([m], m.id in ^ids)
+      |> Repo.update_all(set: [monitored: monitored, updated_at: DateTime.utc_now()])
+      |> elem(0)
+    end)
+  end
+
+  @doc """
+  Updates multiple media items with the given attributes in a transaction.
+
+  Only updates non-nil attributes. Returns `{:ok, count}` on success
+  where count is the number of updated items.
+  """
+  def update_media_items_batch(ids, attrs) when is_list(ids) and is_map(attrs) do
+    Repo.transaction(fn ->
+      # Build the update list, only including non-nil values
+      updates =
+        attrs
+        |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+        |> Enum.into(%{})
+        |> Map.put(:updated_at, DateTime.utc_now())
+
+      if map_size(updates) > 1 do
+        # More than just updated_at
+        MediaItem
+        |> where([m], m.id in ^ids)
+        |> Repo.update_all(set: Map.to_list(updates))
+        |> elem(0)
+      else
+        0
+      end
+    end)
+  end
+
+  @doc """
+  Deletes multiple media items in a transaction.
+
+  Returns `{:ok, count}` where count is the number of deleted items,
+  or `{:error, reason}` if the transaction fails.
+  """
+  def delete_media_items(ids) when is_list(ids) do
+    Repo.transaction(fn ->
+      MediaItem
+      |> where([m], m.id in ^ids)
+      |> Repo.delete_all()
+      |> elem(0)
+    end)
+  end
+
+  @doc """
+  Returns the count of movies in the library.
+  """
+  def count_movies do
+    MediaItem
+    |> where([m], m.type == "movie")
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Returns the count of TV shows in the library.
+  """
+  def count_tv_shows do
+    MediaItem
+    |> where([m], m.type == "tv_show")
+    |> Repo.aggregate(:count)
+  end
+
   ## Episodes
 
   @doc """
@@ -144,6 +219,31 @@ defmodule Mydia.Media do
   end
 
   @doc """
+  Updates the monitored status for all episodes in a season.
+
+  Returns `{:ok, count}` where count is the number of updated episodes,
+  or `{:error, reason}` if the transaction fails.
+
+  ## Examples
+
+      iex> update_season_monitoring(media_item_id, 1, true)
+      {:ok, 12}
+
+      iex> update_season_monitoring(media_item_id, 2, false)
+      {:ok, 8}
+  """
+  def update_season_monitoring(media_item_id, season_number, monitored)
+      when is_boolean(monitored) do
+    Repo.transaction(fn ->
+      Episode
+      |> where([e], e.media_item_id == ^media_item_id)
+      |> where([e], e.season_number == ^season_number)
+      |> Repo.update_all(set: [monitored: monitored, updated_at: DateTime.utc_now()])
+      |> elem(0)
+    end)
+  end
+
+  @doc """
   Deletes an episode.
   """
   def delete_episode(%Episode{} = episode) do
@@ -157,7 +257,352 @@ defmodule Mydia.Media do
     Episode.changeset(episode, attrs)
   end
 
+  @doc """
+  Gets aggregate status for a media item (TV show or movie).
+
+  For TV shows, returns status based on all episodes:
+  - `:not_monitored` - Media item not monitored
+  - `:downloaded` - All monitored episodes downloaded
+  - `:partial` - Some episodes downloaded, some missing
+  - `:downloading` - Has active downloads
+  - `:missing` - No episodes downloaded
+  - `:upcoming` - All episodes are upcoming
+
+  For movies, returns simple status based on media files and downloads.
+
+  Returns tuple: `{status, %{downloaded: count, total: count}}` for TV shows
+  or `{status, nil}` for movies.
+
+  ## Examples
+
+      iex> get_media_status(%MediaItem{type: "tv_show", monitored: true, episodes: [...]})
+      {:partial, %{downloaded: 5, total: 24}}
+
+      iex> get_media_status(%MediaItem{type: "movie", monitored: true})
+      {:downloaded, nil}
+  """
+  def get_media_status(%MediaItem{type: "movie", monitored: false}), do: {:not_monitored, nil}
+
+  def get_media_status(%MediaItem{type: "movie"} = media_item) do
+    has_files = length(media_item.media_files) > 0
+
+    has_downloads =
+      length(media_item.downloads) > 0 &&
+        Enum.any?(media_item.downloads, &(&1.status in [:pending, :downloading]))
+
+    status =
+      cond do
+        has_files -> :downloaded
+        has_downloads -> :downloading
+        true -> :missing
+      end
+
+    {status, nil}
+  end
+
+  def get_media_status(%MediaItem{type: "tv_show", monitored: false}), do: {:not_monitored, nil}
+
+  def get_media_status(%MediaItem{type: "tv_show", episodes: episodes}) do
+    monitored_episodes = Enum.filter(episodes, & &1.monitored)
+    total_monitored = length(monitored_episodes)
+
+    if total_monitored == 0 do
+      {:not_monitored, %{downloaded: 0, total: 0}}
+    else
+      downloaded_count =
+        monitored_episodes
+        |> Enum.count(fn ep -> length(ep.media_files) > 0 end)
+
+      has_active_downloads =
+        monitored_episodes
+        |> Enum.any?(fn ep ->
+          Enum.any?(ep.downloads, &(&1.status in [:pending, :downloading]))
+        end)
+
+      all_upcoming =
+        monitored_episodes
+        |> Enum.all?(fn ep ->
+          ep.air_date && Date.compare(ep.air_date, Date.utc_today()) == :gt
+        end)
+
+      status =
+        cond do
+          downloaded_count == total_monitored -> :downloaded
+          has_active_downloads -> :downloading
+          all_upcoming -> :upcoming
+          downloaded_count > 0 -> :partial
+          true -> :missing
+        end
+
+      {status, %{downloaded: downloaded_count, total: total_monitored}}
+    end
+  end
+
+  @doc """
+  Refreshes episodes for a TV show by fetching metadata and creating missing episodes.
+
+  This function is useful for:
+  - TV shows added before season metadata was included
+  - Manually refreshing episodes when new seasons are available
+  - Fixing TV shows with missing episode data
+
+  ## Parameters
+    - `media_item` - The TV show media item (must be type "tv_show")
+    - `opts` - Options for episode creation
+      - `:season_monitoring` - Which seasons to fetch ("all", "first", "latest", "none")
+      - `:force` - If true, will delete and recreate all episodes (default: false)
+
+  ## Returns
+    - `{:ok, count}` - Number of episodes created
+    - `{:error, reason}` - Error reason
+
+  ## Examples
+
+      iex> refresh_episodes_for_tv_show(media_item)
+      {:ok, 236}
+
+      iex> refresh_episodes_for_tv_show(media_item, season_monitoring: "latest")
+      {:ok, 12}
+  """
+  def refresh_episodes_for_tv_show(media_item, opts \\ [])
+
+  def refresh_episodes_for_tv_show(%MediaItem{type: "tv_show"} = media_item, opts) do
+    alias Mydia.Metadata
+
+    season_monitoring = Keyword.get(opts, :season_monitoring, "all")
+    force = Keyword.get(opts, :force, false)
+
+    # Get TMDB ID from metadata
+    tmdb_id =
+      case media_item.metadata do
+        %{"provider_id" => id} when is_binary(id) -> id
+        _ -> media_item.tmdb_id
+      end
+
+    if is_nil(tmdb_id) or tmdb_id == "" do
+      {:error, :missing_tmdb_id}
+    else
+      # Fetch fresh metadata to get seasons info
+      config = Metadata.default_relay_config()
+
+      case Metadata.fetch_by_id(config, to_string(tmdb_id), media_type: :tv_show) do
+        {:ok, metadata} ->
+          # Delete existing episodes if force option is enabled
+          if force do
+            Episode
+            |> where([e], e.media_item_id == ^media_item.id)
+            |> Repo.delete_all()
+          end
+
+          # Get seasons from metadata
+          seasons = metadata[:seasons] || []
+
+          # Filter seasons based on monitoring preference
+          seasons_to_fetch =
+            case season_monitoring do
+              "all" -> seasons
+              "first" -> Enum.take(seasons, 1)
+              "latest" -> Enum.take(seasons, -1)
+              "none" -> []
+              _ -> seasons
+            end
+
+          # Fetch and create episodes for each season
+          episode_count =
+            Enum.reduce(seasons_to_fetch, 0, fn season, count ->
+              # Skip season 0 (specials) unless explicitly monitoring all
+              if season[:season_number] == 0 and season_monitoring != "all" do
+                count
+              else
+                case create_episodes_for_season(media_item, season, config, force) do
+                  {:ok, created} -> count + created
+                  {:error, _reason} -> count
+                end
+              end
+            end)
+
+          {:ok, episode_count}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  def refresh_episodes_for_tv_show(%MediaItem{type: type}, opts) do
+    {:error, {:invalid_type, "Expected tv_show, got #{type}"}}
+  end
+
+  ## Calendar
+
+  @doc """
+  Returns episodes with air dates in the specified date range.
+  Only returns episodes for monitored media items by default.
+
+  ## Options
+    - `:preload` - List of associations to preload
+    - `:monitored` - Filter by media item monitored status (default: true)
+  """
+  def list_episodes_by_air_date(start_date, end_date, opts \\ []) do
+    monitored = Keyword.get(opts, :monitored, true)
+
+    Episode
+    |> join(:inner, [e], m in MediaItem, on: e.media_item_id == m.id)
+    |> where([e, m], not is_nil(e.air_date))
+    |> where([e, m], e.air_date >= ^start_date and e.air_date <= ^end_date)
+    |> where([e, m], m.monitored == ^monitored)
+    |> select([e, m], %{
+      id: e.id,
+      type: "episode",
+      air_date: e.air_date,
+      title: e.title,
+      season_number: e.season_number,
+      episode_number: e.episode_number,
+      media_item_id: m.id,
+      media_item_title: m.title,
+      media_item_type: m.type,
+      has_files:
+        fragment(
+          "CASE WHEN EXISTS(SELECT 1 FROM media_files WHERE episode_id = ?) THEN true ELSE false END",
+          e.id
+        ),
+      has_downloads:
+        fragment(
+          "CASE WHEN EXISTS(SELECT 1 FROM downloads WHERE episode_id = ?) THEN true ELSE false END",
+          e.id
+        )
+    })
+    |> order_by([e, m], asc: e.air_date, asc: m.title)
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns monitored movies with release dates in the specified date range from metadata.
+  Movies must have a release_date in their metadata field.
+
+  ## Options
+    - `:monitored` - Filter by monitored status (default: true)
+  """
+  def list_movies_by_release_date(start_date, end_date, opts \\ []) do
+    monitored = Keyword.get(opts, :monitored, true)
+
+    MediaItem
+    |> where([m], m.type == "movie")
+    |> where([m], m.monitored == ^monitored)
+    |> where([m], not is_nil(fragment("?->>'release_date'", m.metadata)))
+    |> Repo.all()
+    |> Enum.filter(fn item ->
+      case item.metadata do
+        %{"release_date" => date_str} when is_binary(date_str) ->
+          case Date.from_iso8601(date_str) do
+            {:ok, date} ->
+              Date.compare(date, start_date) != :lt and Date.compare(date, end_date) != :gt
+
+            _ ->
+              false
+          end
+
+        _ ->
+          false
+      end
+    end)
+    |> Enum.map(fn item ->
+      {:ok, release_date} = Date.from_iso8601(item.metadata["release_date"])
+
+      has_files =
+        Repo.exists?(from f in Mydia.Library.MediaFile, where: f.media_item_id == ^item.id)
+
+      has_downloads =
+        Repo.exists?(from d in Mydia.Downloads.Download, where: d.media_item_id == ^item.id)
+
+      %{
+        id: item.id,
+        type: "movie",
+        air_date: release_date,
+        title: item.title,
+        media_item_id: item.id,
+        media_item_title: item.title,
+        media_item_type: item.type,
+        has_files: has_files,
+        has_downloads: has_downloads
+      }
+    end)
+  end
+
   ## Private Functions
+
+  defp create_episodes_for_season(media_item, season, config, force) do
+    alias Mydia.Metadata
+
+    # Fetch season details with episodes
+    tmdb_id =
+      case media_item.metadata do
+        %{"provider_id" => id} when is_binary(id) -> id
+        _ -> media_item.tmdb_id
+      end
+
+    case Metadata.fetch_season(config, to_string(tmdb_id), season[:season_number]) do
+      {:ok, season_data} ->
+        episodes = season_data[:episodes] || []
+
+        created_count =
+          Enum.reduce(episodes, 0, fn episode, count ->
+            season_num = episode[:season_number]
+            episode_num = episode[:episode_number]
+
+            # Skip if season or episode number is nil
+            if is_nil(season_num) or is_nil(episode_num) do
+              count
+            else
+              # Check if episode already exists (unless force is enabled)
+              existing =
+                if force do
+                  nil
+                else
+                  get_episode_by_number(
+                    media_item.id,
+                    season_num,
+                    episode_num
+                  )
+                end
+
+              if is_nil(existing) do
+                case create_episode(%{
+                       media_item_id: media_item.id,
+                       season_number: season_num,
+                       episode_number: episode_num,
+                       title: episode[:name],
+                       air_date: parse_air_date(episode[:air_date]),
+                       metadata: episode,
+                       monitored: media_item.monitored
+                     }) do
+                  {:ok, _episode} -> count + 1
+                  {:error, _changeset} -> count
+                end
+              else
+                count
+              end
+            end
+          end)
+
+        {:ok, created_count}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp parse_air_date(nil), do: nil
+  defp parse_air_date(%Date{} = date), do: date
+
+  defp parse_air_date(date_str) when is_binary(date_str) do
+    case Date.from_iso8601(date_str) do
+      {:ok, date} -> date
+      _ -> nil
+    end
+  end
+
+  defp parse_air_date(_), do: nil
 
   defp apply_media_item_filters(query, opts) do
     Enum.reduce(opts, query, fn
