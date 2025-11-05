@@ -187,7 +187,12 @@ defmodule Mydia.Library.MetadataMatcherTest do
     test "handles combination of variations" do
       # "The Lord of the Rings: The Two Towers" vs "Lord of the Rings: The Two Towers"
       # After normalization, these are very similar (substring match)
-      similarity = test_title_similarity("The Lord of the Rings: The Two Towers", "Lord of the Rings: The Two Towers")
+      similarity =
+        test_title_similarity(
+          "The Lord of the Rings: The Two Towers",
+          "Lord of the Rings: The Two Towers"
+        )
+
       assert similarity >= 0.8
     end
   end

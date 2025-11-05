@@ -6,7 +6,10 @@ defmodule MydiaWeb.AuthController do
   """
   use MydiaWeb, :controller
 
-  plug Ueberauth
+  # Only load Ueberauth if OIDC is configured
+  if Application.compile_env(:ueberauth, Ueberauth) do
+    plug Ueberauth
+  end
 
   alias Mydia.Accounts
   alias Mydia.Auth.Guardian
