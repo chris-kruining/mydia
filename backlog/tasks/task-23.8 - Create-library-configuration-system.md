@@ -20,7 +20,7 @@ priority: high
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Implement the configuration system for media libraries that supports both YAML configuration files and environment variables. Users should be able to configure multiple library paths with types (movie, tv_show), naming patterns, and scanning preferences.
 
-Follow the configuration patterns shown in technical.md with runtime.exs. The configuration example already shows media.library_paths structure - implement the full system with validation.
+Follow the configuration patterns shown in docs/architecture/technical.md with runtime.exs. The configuration example already shows media.library_paths structure - implement the full system with validation.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

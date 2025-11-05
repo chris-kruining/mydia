@@ -23,7 +23,7 @@ priority: high
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Create an Oban background job that periodically monitors configured download clients for completed downloads and imports them into the media library. The job should update download records in the database with current progress and handle the import workflow when downloads complete.
 
-This job should run on a schedule (e.g., every 5 minutes as shown in technical.md) and process downloads across all configured clients efficiently.
+This job should run on a schedule (e.g., every 5 minutes as shown in docs/architecture/technical.md) and process downloads across all configured clients efficiently.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

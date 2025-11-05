@@ -32,5 +32,5 @@ Build a centralized configuration resolution system that implements the preceden
 - [ ] #7 YAML config file parsing integrated (using YamlElixir or similar)
 - [ ] #8 Default values defined in code as fallback
 - [ ] #9 Tests verify precedence resolution logic
-- [ ] #10 Settings cache using ETS for performance (as per technical.md)
+- [ ] #10 Settings cache using ETS for performance (as per docs/architecture/technical.md)
 <!-- AC:END -->

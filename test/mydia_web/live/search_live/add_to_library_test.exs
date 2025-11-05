@@ -3,6 +3,7 @@ defmodule MydiaWeb.SearchLive.AddToLibraryTest do
 
   import Phoenix.LiveViewTest
   import Mydia.MediaFixtures
+  import MydiaWeb.AuthHelpers
   alias Mydia.{Accounts, Media, Repo}
 
   @mock_movie_metadata %{
@@ -35,12 +36,10 @@ defmodule MydiaWeb.SearchLive.AddToLibraryTest do
 
   setup do
     # Create an admin user for testing
-    {:ok, user} =
-      Accounts.create_user(%{
+    user =
+      create_admin_user(%{
         email: "test@example.com",
-        username: "testuser",
-        password_hash: "$2b$12$test",
-        role: "admin"
+        username: "testuser"
       })
 
     # Generate JWT token for the user
@@ -52,7 +51,7 @@ defmodule MydiaWeb.SearchLive.AddToLibraryTest do
   defp authenticate_conn(conn, token) do
     conn
     |> Plug.Test.init_test_session(%{})
-    |> put_session(:guardian_default_token, token)
+    |> put_session(:guardian_token, token)
     |> put_req_header("authorization", "Bearer #{token}")
   end
 

@@ -17,7 +17,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implement the main application layout with sidebar navigation, top toolbar, and responsive design using Tailwind CSS v4 with DaisyUI 4.x. Follow design.md specifications using DaisyUI components combined with custom Tailwind utilities.
+Implement the main application layout with sidebar navigation, top toolbar, and responsive design using Tailwind CSS v4 with DaisyUI 4.x. Follow docs/architecture/design.md specifications using DaisyUI components combined with custom Tailwind utilities.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

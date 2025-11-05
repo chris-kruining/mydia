@@ -1,9 +1,10 @@
 ---
 id: task-22.10
 title: Implement automatic background search for monitored media
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2025-11-04 16:02'
+updated_date: '2025-11-05 02:39'
 labels:
   - automation
   - oban

@@ -1,6 +1,13 @@
 # Production Deployment Guide
 
-This guide covers deploying Mydia using Docker in a production environment.
+This guide covers advanced deployment topics for Mydia. For basic deployment instructions, see the [Production Deployment](../../README.md#-production-deployment) section in the main README.
+
+## Quick Reference
+
+**Basic deployment steps:**
+1. See [README.md](../../README.md#-production-deployment) for quick start with Docker Compose or Docker Run
+2. Review the [Environment Variables Reference](../../README.md#-environment-variables-reference) for all configuration options
+3. Return to this guide for advanced topics below
 
 ## Installation Options
 
@@ -26,75 +33,57 @@ Build the image locally from the repository:
 docker build -t mydia:latest -f Dockerfile .
 ```
 
-## Quick Start
+## Configuration Options
 
-### 1. Generate Secrets
+### Using Environment Files (Optional)
 
-Generate required secrets for production:
+While the README shows inline configuration, you can optionally use a `.env` file:
 
-```bash
-# Generate SECRET_KEY_BASE
-openssl rand -base64 48
-
-# Generate GUARDIAN_SECRET_KEY
-openssl rand -base64 48
-```
-
-### 2. Configure Environment
-
-Copy the example environment file and update it with your values:
+1. Create a `.env.prod` file with your configuration:
 
 ```bash
-cp .env.prod.example .env.prod
+# Required secrets (generate with: openssl rand -base64 48)
+SECRET_KEY_BASE=your-secret-key-base-here
+GUARDIAN_SECRET_KEY=your-guardian-secret-key-here
+
+# Server configuration
+PHX_HOST=mydia.example.com
+PORT=4000
+DATABASE_PATH=/data/mydia.db
+
+# Media paths
+MOVIES_PATH=/media/movies
+TV_PATH=/media/tv
+
+# Optional: OIDC authentication
+OIDC_DISCOVERY_DOCUMENT_URI=https://auth.example.com/.well-known/openid-configuration
+OIDC_CLIENT_ID=your-client-id
+OIDC_CLIENT_SECRET=your-client-secret
 ```
 
-Edit `.env.prod` and set:
-- `SECRET_KEY_BASE` - Use the first generated secret
-- `GUARDIAN_SECRET_KEY` - Use the second generated secret
-- `PHX_HOST` - Your domain name
-- `MEDIA_PATH_*` - Paths to your media directories
-- (Optional) OIDC settings for authentication
-
-### 3. Pull the Image
-
-```bash
-docker pull ghcr.io/arsfeld/mydia:latest
-```
-
-Or skip this step - docker-compose will pull the image automatically.
-
-### 4. Update docker-compose.prod.yml
-
-Ensure your `docker-compose.prod.yml` references the published image:
+2. Reference it in your docker-compose.yml:
 
 ```yaml
 services:
   mydia:
-    image: ghcr.io/arsfeld/mydia:latest  # Or specify a version like :v1.0.0
+    image: ghcr.io/arsfeld/mydia:latest
+    env_file: .env.prod
     # ... rest of configuration
 ```
 
-### 5. Run with Docker Compose
-
-```bash
-docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
-```
-
-## Manual Docker Run
-
-If you prefer to run without Docker Compose:
+Or with Docker Run:
 
 ```bash
 docker run -d \
   --name mydia \
-  -p 4000:4000 \
   --env-file .env.prod \
   -v mydia_data:/data \
   -v /path/to/movies:/media/movies \
   -v /path/to/tv:/media/tv \
-  -v /path/to/downloads:/media/downloads \
   ghcr.io/arsfeld/mydia:latest
 ```
+
+See the [Environment Variables Reference](../../README.md#-environment-variables-reference) for all available options.
 
 ## Health Check
 
@@ -113,32 +102,16 @@ Response:
 }
 ```
 
-## Configuration
+## Advanced Configuration
 
-### Required Environment Variables
+For a complete list of all configuration options, see the [Environment Variables Reference](../../README.md#-environment-variables-reference) in the README.
 
-- `SECRET_KEY_BASE` - Phoenix secret key (generate with `openssl rand -base64 48`)
-- `GUARDIAN_SECRET_KEY` - JWT secret key (generate with `openssl rand -base64 48`)
-- `DATABASE_PATH` - Path to SQLite database file (default: `/data/mydia.db`)
-
-### Optional Environment Variables
-
-- `PHX_HOST` - Hostname for the application (default: `localhost`)
-- `PORT` - HTTP port (default: `4000`)
-- `POOL_SIZE` - Database connection pool size (default: `5`)
-- `MEDIA_PATH_MOVIES` - Path to movie library
-- `MEDIA_PATH_TV` - Path to TV show library
-- `MEDIA_PATH_DOWNLOADS` - Path to downloads directory
-
-### OIDC Authentication (Optional)
-
-If you want to use OpenID Connect authentication:
-
-- `OIDC_DISCOVERY_DOCUMENT_URI` - OIDC discovery endpoint
-- `OIDC_CLIENT_ID` - OAuth client ID
-- `OIDC_CLIENT_SECRET` - OAuth client secret
-- `OIDC_REDIRECT_URI` - OAuth redirect URI
-- `OIDC_SCOPES` - OAuth scopes (default: `openid profile email`)
+Advanced topics include:
+- Download client integration (qBittorrent, Transmission)
+- Indexer configuration (Prowlarr, Jackett)
+- Database performance tuning
+- Background job configuration
+- Custom logging levels
 
 ## Volumes
 
@@ -191,18 +164,27 @@ To upgrade to a new version:
 
 Migrations will run automatically on startup.
 
+### With Docker Compose
+
 ```bash
-docker-compose -f docker-compose.prod.yml --env-file .env.prod down
+docker compose pull
+docker compose down
+docker compose up -d
+```
+
+### With Docker Run
+
+```bash
 docker pull ghcr.io/arsfeld/mydia:latest
-docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
+docker stop mydia && docker rm mydia
+# Re-run your docker run command
 ```
 
 To upgrade to a specific version, specify the version tag:
 
 ```bash
 docker pull ghcr.io/arsfeld/mydia:v1.0.0
-# Update docker-compose.prod.yml to use the specific version
-docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
+# Update your docker-compose.yml or docker run command to use the specific version
 ```
 
 ## Release Process

@@ -20,7 +20,7 @@ priority: high
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Implement the configuration system for download clients that supports both YAML configuration files and environment variables. The system should allow users to configure multiple download clients with different types (qBittorrent, Transmission) and priorities.
 
-Follow the configuration patterns shown in technical.md with runtime.exs and support for environment variable substitution.
+Follow the configuration patterns shown in docs/architecture/technical.md with runtime.exs and support for environment variable substitution.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

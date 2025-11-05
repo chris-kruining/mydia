@@ -21,7 +21,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Create an Oban background job that orchestrates the library scanning process: file system scanning → file parsing → metadata matching → database updates. The job should run on a schedule (e.g., daily at 2 AM as shown in technical.md) and can be triggered manually.
+Create an Oban background job that orchestrates the library scanning process: file system scanning → file parsing → metadata matching → database updates. The job should run on a schedule (e.g., daily at 2 AM as shown in docs/architecture/technical.md) and can be triggered manually.
 
 The job should be resilient to failures, track progress, and provide status updates. Support full scans and incremental scans (only new/changed files).
 <!-- SECTION:DESCRIPTION:END -->

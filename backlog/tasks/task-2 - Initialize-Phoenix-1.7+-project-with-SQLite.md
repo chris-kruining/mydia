@@ -16,7 +16,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Generate new Phoenix 1.7+ application with LiveView and configure it to use SQLite3 instead of PostgreSQL. Set up the base project structure following the technical.md specifications.
+Generate new Phoenix 1.7+ application with LiveView and configure it to use SQLite3 instead of PostgreSQL. Set up the base project structure following the docs/architecture/technical.md specifications.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

@@ -4,7 +4,7 @@ title: Set up testing infrastructure and write initial tests
 status: In Progress
 assignee: []
 created_date: '2025-11-04 01:52'
-updated_date: '2025-11-05 00:00'
+updated_date: '2025-11-05 02:16'
 labels:
   - testing
   - quality
@@ -128,4 +128,55 @@ This task needs investigation to determine actual current state vs. desired stat
 3. Ensure ETS tables are initialized for tests
 4. Add more comprehensive tests for uncovered contexts
 5. Measure test coverage with mix test --cover
+
+## Session Progress (2025-11-04 continued)
+
+### Fixes Implemented
+1. ✅ Fixed AuthHelpers to use `password` instead of `password_hash`
+   - Changed create_test_user to pass password field to Accounts.create_user
+   - This allows the User.changeset to properly hash passwords
+
+2. ✅ Fixed SearchLive tests to use correct session key
+   - Updated add_to_library_test.exs to use AuthHelpers
+   - Changed session key from `:guardian_default_token` to `:guardian_token`
+   - This matches the UserAuth hook expectations
+
+3. ✅ Fixed Settings module to handle UUID (binary_id) for download clients
+   - Added UUID validation using Ecto.UUID.cast/1
+   - Settings.get_download_client_config! now handles:
+     - Runtime IDs (special format)
+     - UUIDs (binary_id from database)
+     - Integer IDs (backwards compatibility)
+   - Fixed lib/mydia/settings.ex:277-293
+
+### Test Results
+- **Before fixes**: 608 tests, 80 failures, 11 skipped
+- **After fixes**: 608 tests, 52 failures, 11 skipped
+- **Improvement**: Reduced failures by 28 (35% reduction)
+
+### Current Test Coverage
+- Overall coverage: **28.05%** (below 90% threshold but above initial 0%)
+- Many modules have 0% coverage (LiveViews, Controllers, some contexts)
+- Some modules have 100% coverage (schemas, configs, some helpers)
+
+### Remaining Test Failures (52 total)
+Breakdown by category:
+1. **Metadata Provider Relay tests** (~20 failures)
+   - Need mock server or external service setup
+   - Tests: search, fetch_by_id, fetch_images, fetch_season, etc.
+
+2. **AdminConfigLiveTest** (~20 failures)
+   - Authentication, navigation, CRUD operations
+   - May need additional LiveView test setup
+
+3. **Quality Parser/Indexer tests** (~5 failures)
+   - quality_description, quality_score, parsing tests
+
+4. **Misc tests** (~7 failures)
+   - LibraryScanner, DownloadMonitor, SearchLive, etc.
+
+### Files Modified
+- test/support/auth_helpers.ex - Fixed password handling
+- test/mydia_web/live/search_live/add_to_library_test.exs - Fixed session key
+- lib/mydia/settings.ex - Added UUID support for download clients
 <!-- SECTION:NOTES:END -->

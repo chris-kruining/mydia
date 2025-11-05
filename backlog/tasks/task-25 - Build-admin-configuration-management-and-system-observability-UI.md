@@ -27,7 +27,7 @@ Create comprehensive admin interface for monitoring system state and managing co
 - [ ] #3 UI clearly shows configuration source for each setting
 - [ ] #4 All configuration changes made via UI are persisted to database
 - [ ] #5 Environment variables cannot be overridden by UI (read-only display)
-- [ ] #6 System follows technical.md architecture and product.md vision for self-hosting simplicity
+- [ ] #6 System follows docs/architecture/technical.md architecture and docs/product/product.md vision for self-hosting simplicity
 <!-- AC:END -->
 
 ## Implementation Notes

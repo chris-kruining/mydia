@@ -273,13 +273,23 @@ defmodule Mydia.Settings do
           raise "Invalid runtime download client ID: #{id}"
       end
     else
-      # Try to parse as integer ID for database lookup
-      case Integer.parse(id) do
-        {int_id, ""} ->
-          get_download_client_config!(int_id, opts)
+      # Check if it's a valid UUID (binary_id)
+      case Ecto.UUID.cast(id) do
+        {:ok, uuid} ->
+          # Query by UUID
+          DownloadClientConfig
+          |> maybe_preload(opts[:preload])
+          |> Repo.get!(uuid)
 
-        _ ->
-          raise "Invalid download client ID: #{id}"
+        :error ->
+          # Try to parse as integer ID for database lookup
+          case Integer.parse(id) do
+            {int_id, ""} ->
+              get_download_client_config!(int_id, opts)
+
+            _ ->
+              raise "Invalid download client ID: #{id}"
+          end
       end
     end
   end

@@ -29,7 +29,7 @@ Implement REST API endpoints for programmatic configuration management, allowing
 - [ ] #5 DELETE /api/v1/config/:key removes database override (falls back to file/default)
 - [ ] #6 Endpoints require API key with admin role
 - [ ] #7 Environment variable settings return error on update attempt
-- [ ] #8 API responses follow technical.md REST API design
+- [ ] #8 API responses follow docs/architecture/technical.md REST API design
 - [ ] #9 OpenAPI/Swagger documentation generated
 - [ ] #10 Tests cover authentication, authorization, and CRUD operations
 <!-- AC:END -->

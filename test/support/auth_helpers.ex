@@ -16,7 +16,7 @@ defmodule MydiaWeb.AuthHelpers do
     default_attrs = %{
       email: "test-#{System.unique_integer([:positive])}@example.com",
       username: "testuser#{System.unique_integer([:positive])}",
-      password_hash: Bcrypt.hash_pwd_salt("password123"),
+      password: "password123",
       role: "user"
     }
 

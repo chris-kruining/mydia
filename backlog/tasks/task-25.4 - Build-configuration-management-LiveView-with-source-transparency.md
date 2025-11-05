@@ -35,6 +35,6 @@ Create an admin-only configuration management UI that allows administrators to v
 - [x] #9 Library paths section with directory validation
 - [x] #10 Changes persist to database via Settings context
 - [x] #11 Success/error flash messages for configuration changes
-- [x] #12 UI uses DaisyUI components matching product.md vision
+- [x] #12 UI uses DaisyUI components matching docs/product/product.md vision
 - [x] #13 Tests cover form submission and validation
 <!-- AC:END -->

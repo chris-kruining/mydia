@@ -17,7 +17,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implement the core database schema from technical.md including media_items, episodes, media_files, quality_profiles, downloads, users, and api_keys tables. Use SQLite-compatible types (TEXT for UUIDs, JSON as TEXT, INTEGER for booleans).
+Implement the core database schema from docs/architecture/technical.md including media_items, episodes, media_files, quality_profiles, downloads, users, and api_keys tables. Use SQLite-compatible types (TEXT for UUIDs, JSON as TEXT, INTEGER for booleans).
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

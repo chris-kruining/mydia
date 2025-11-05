@@ -103,9 +103,12 @@ mydia/
 │   │   └── migrations/       # Database migrations
 │   └── static/               # Static assets
 ├── test/                     # Test files
-├── design.md                 # Design system documentation
-├── product.md                # Product specification
-├── technical.md              # Technical architecture
+├── docs/
+│   ├── architecture/
+│   │   ├── design.md         # Design system documentation
+│   │   └── technical.md      # Technical architecture
+│   └── product/
+│       └── product.md        # Product specification
 ├── README.md                 # Quick start guide
 ├── compose.yml               # Docker Compose configuration
 ├── dev                       # Development command wrapper
@@ -142,7 +145,7 @@ mix phx.server
 1. **Create Database Schema**
    - Generate migrations for media_items, episodes, media_files
    - Add quality_profiles, downloads, users tables
-   - Set up indexes per technical.md
+   - Set up indexes per docs/architecture/technical.md
 
 2. **Implement Core Contexts**
    - `Mydia.Media` - Media management (movies, TV shows)
@@ -225,10 +228,10 @@ mix assets.build           # Build assets
 
 ## Documentation
 
-- **[README.md](README.md)** - Quick start and overview
-- **[product.md](product.md)** - Product vision, features, roadmap
-- **[technical.md](technical.md)** - Technical architecture and database schema
-- **[design.md](design.md)** - Design system and UI components
+- **[README.md](../../README.md)** - Quick start and overview
+- **[product.md](../product/product.md)** - Product vision, features, roadmap
+- **[technical.md](../architecture/technical.md)** - Technical architecture and database schema
+- **[design.md](../architecture/design.md)** - Design system and UI components
 
 ## Notes
 

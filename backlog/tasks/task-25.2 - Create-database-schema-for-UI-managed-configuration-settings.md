@@ -30,5 +30,5 @@ Design and implement database tables to store configuration settings that admini
 - [ ] #6 All tables use SQLite-compatible types (TEXT for UUIDs, JSON, enums)
 - [ ] #7 Indexes created on frequently queried fields
 - [ ] #8 Foreign keys to users table for audit tracking
-- [ ] #9 Migration follows technical.md SQLite guidelines
+- [ ] #9 Migration follows docs/architecture/technical.md SQLite guidelines
 <!-- AC:END -->
