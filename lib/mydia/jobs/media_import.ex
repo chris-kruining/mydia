@@ -282,11 +282,104 @@ defmodule Mydia.Jobs.MediaImport do
     # Parse filename to extract episode info for TV shows
     parsed = FileParser.parse(file.name)
 
+    # Check if this is a season pack download
+    is_season_pack = get_in(download.metadata, ["season_pack"]) == true
+    season_pack_season = get_in(download.metadata, ["season_number"])
+
     # Determine episode and destination path
     {episode, dest_dir} =
-      case {download.media_item, download.episode, parsed.type} do
+      case {download.media_item, download.episode, parsed.type, is_season_pack} do
+        # Season pack - use metadata season number as authoritative source
+        {%{type: "tv_show"} = media_item, _, :tv_show, true}
+        when not is_nil(season_pack_season) and not is_nil(parsed.episodes) ->
+          episode_number = List.first(parsed.episodes) || 1
+
+          Logger.debug("Processing season pack file",
+            file: file.name,
+            season_pack_season: season_pack_season,
+            episode_number: episode_number
+          )
+
+          episode =
+            Media.get_episode_by_number(
+              media_item.id,
+              season_pack_season,
+              episode_number
+            )
+
+          episode =
+            if is_nil(episode) do
+              Logger.info("Episode not found, refreshing episodes for TV show",
+                media_item: media_item.title,
+                season: season_pack_season
+              )
+
+              # Try to refresh episodes from metadata provider
+              case Media.refresh_episodes_for_tv_show(media_item) do
+                {:ok, count} ->
+                  Logger.info("Refreshed episodes, created #{count} episodes")
+
+                  # Retry episode lookup
+                  Media.get_episode_by_number(
+                    media_item.id,
+                    season_pack_season,
+                    episode_number
+                  )
+
+                {:error, reason} ->
+                  Logger.error("Failed to refresh episodes",
+                    media_item: media_item.title,
+                    reason: inspect(reason)
+                  )
+
+                  nil
+              end
+            else
+              episode
+            end
+
+          if episode do
+            Logger.debug("Found episode for season pack file",
+              file: file.name,
+              season: season_pack_season,
+              episode: episode_number,
+              episode_id: episode.id
+            )
+
+            # Build destination path using season pack metadata
+            title = sanitize_filename(media_item.title)
+
+            dest_dir =
+              Path.join([
+                library_root,
+                title,
+                "Season #{String.pad_leading("#{season_pack_season}", 2, "0")}"
+              ])
+
+            {episode, dest_dir}
+          else
+            Logger.warning("Episode still not found after refresh attempt",
+              file: file.name,
+              season: season_pack_season,
+              episode: episode_number,
+              media_item: media_item.title
+            )
+
+            # Build season folder path even without episode
+            title = sanitize_filename(media_item.title)
+
+            dest_dir =
+              Path.join([
+                library_root,
+                title,
+                "Season #{String.pad_leading("#{season_pack_season}", 2, "0")}"
+              ])
+
+            {nil, dest_dir}
+          end
+
         # TV show with parsed episode info - look up the episode
-        {%{type: "tv_show"} = media_item, _, :tv_show} when not is_nil(parsed.season) ->
+        {%{type: "tv_show"} = media_item, _, :tv_show, _} when not is_nil(parsed.season) ->
           episode_number = List.first(parsed.episodes) || 1
 
           episode =
@@ -329,7 +422,7 @@ defmodule Mydia.Jobs.MediaImport do
           end
 
         # TV show but no parsed info - use download episode
-        {%{type: "tv_show"}, episode, _} when not is_nil(episode) ->
+        {%{type: "tv_show"}, episode, _, _} when not is_nil(episode) ->
           dest_dir = build_destination_path(download, library_root)
           {episode, dest_dir}
 
