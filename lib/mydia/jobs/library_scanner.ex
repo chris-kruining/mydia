@@ -191,29 +191,113 @@ defmodule Mydia.Jobs.LibraryScanner do
             :ok
         end)
 
-        # Also re-enrich orphaned files (files without media_item_id or episode_id)
-        orphaned_files =
+        # Initialize tracking for robust cleanup operations
+        cleanup_stats = %{
+          orphaned_files_fixed: 0,
+          tv_orphans_fixed: 0,
+          associations_updated: 0,
+          invalid_paths_removed: 0
+        }
+
+        # 1. Re-enrich completely orphaned files (no media_item_id and no episode_id)
+        completely_orphaned =
           existing_files
           |> Enum.filter(fn file ->
             is_nil(file.media_item_id) and is_nil(file.episode_id)
           end)
 
-        if orphaned_files != [] do
-          Logger.info("Re-enriching orphaned files", count: length(orphaned_files))
+        cleanup_stats =
+          if completely_orphaned != [] do
+            Logger.info("Re-enriching completely orphaned files",
+              count: length(completely_orphaned)
+            )
 
-          Enum.each(orphaned_files, fn media_file ->
-            # Find the file in scan_result to get file_info
-            file_info =
-              Enum.find(result.scan_result.files, fn f -> f.path == media_file.path end)
+            fixed_count =
+              Enum.count(completely_orphaned, fn media_file ->
+                file_info =
+                  Enum.find(result.scan_result.files, fn f -> f.path == media_file.path end)
 
-            if file_info do
-              Logger.debug("Re-enriching orphaned file", path: media_file.path)
-              process_media_file(media_file, file_info, metadata_config)
-            end
+                if file_info do
+                  Logger.debug("Re-enriching orphaned file", path: media_file.path)
+                  process_media_file(media_file, file_info, metadata_config)
+                  true
+                else
+                  false
+                end
+              end)
+
+            Map.put(cleanup_stats, :orphaned_files_fixed, fixed_count)
+          else
+            cleanup_stats
+          end
+
+        # 2. Fix orphaned TV show files (have media_item_id for TV show but no episode_id)
+        # Preload media_item to check type
+        tv_orphaned_files =
+          existing_files
+          |> Repo.preload(:media_item)
+          |> Enum.filter(fn file ->
+            not is_nil(file.media_item_id) and
+              is_nil(file.episode_id) and
+              file.media_item != nil and
+              file.media_item.type == "tv_show"
           end)
+
+        cleanup_stats =
+          if tv_orphaned_files != [] do
+            Logger.info("Fixing orphaned TV show files", count: length(tv_orphaned_files))
+
+            fixed_count =
+              Enum.count(tv_orphaned_files, fn media_file ->
+                fix_orphaned_tv_file(media_file, metadata_config)
+              end)
+
+            Map.put(cleanup_stats, :tv_orphans_fixed, fixed_count)
+          else
+            cleanup_stats
+          end
+
+        # 3. Re-validate file associations for TV shows
+        # Check if season/episode info changed by re-parsing filenames
+        tv_files_with_episodes =
+          existing_files
+          |> Repo.preload([:media_item, :episode])
+          |> Enum.filter(fn file ->
+            not is_nil(file.episode_id) and file.episode != nil
+          end)
+
+        cleanup_stats =
+          if tv_files_with_episodes != [] do
+            Logger.debug("Re-validating TV file associations",
+              count: length(tv_files_with_episodes)
+            )
+
+            updated_count =
+              Enum.count(tv_files_with_episodes, fn media_file ->
+                revalidate_tv_file_association(media_file)
+              end)
+
+            Map.put(cleanup_stats, :associations_updated, updated_count)
+          else
+            cleanup_stats
+          end
+
+        # 4. Track removed files with invalid paths
+        cleanup_stats =
+          Map.put(cleanup_stats, :invalid_paths_removed, length(result.changes.deleted_files))
+
+        # Log cleanup summary
+        if cleanup_stats.orphaned_files_fixed > 0 or cleanup_stats.tv_orphans_fixed > 0 or
+             cleanup_stats.associations_updated > 0 or cleanup_stats.invalid_paths_removed > 0 do
+          Logger.info("Cleanup summary",
+            orphaned_files_fixed: cleanup_stats.orphaned_files_fixed,
+            tv_orphans_fixed: cleanup_stats.tv_orphans_fixed,
+            associations_updated: cleanup_stats.associations_updated,
+            invalid_paths_removed: cleanup_stats.invalid_paths_removed
+          )
         end
 
-        {:ok, result}
+        {:ok, Map.put(result, :cleanup_stats, cleanup_stats)}
 
       error ->
         error
@@ -230,7 +314,9 @@ defmodule Mydia.Jobs.LibraryScanner do
             })
         end
 
-        # Broadcast scan completed
+        # Broadcast scan completed with cleanup stats
+        cleanup_stats = Map.get(result, :cleanup_stats, %{})
+
         Phoenix.PubSub.broadcast(
           Mydia.PubSub,
           "library_scanner",
@@ -240,7 +326,11 @@ defmodule Mydia.Jobs.LibraryScanner do
              type: library_path.type,
              new_files: length(result.changes.new_files),
              modified_files: length(result.changes.modified_files),
-             deleted_files: length(result.changes.deleted_files)
+             deleted_files: length(result.changes.deleted_files),
+             orphaned_files_fixed: Map.get(cleanup_stats, :orphaned_files_fixed, 0),
+             tv_orphans_fixed: Map.get(cleanup_stats, :tv_orphans_fixed, 0),
+             associations_updated: Map.get(cleanup_stats, :associations_updated, 0),
+             invalid_paths_removed: Map.get(cleanup_stats, :invalid_paths_removed, 0)
            }}
         )
 
@@ -365,6 +455,277 @@ defmodule Mydia.Jobs.LibraryScanner do
         error: Exception.message(error)
       )
   end
+
+  # Attempts to fix an orphaned TV show file by matching it to an episode
+  defp fix_orphaned_tv_file(media_file, metadata_config) do
+    Logger.debug("Attempting to fix orphaned TV file",
+      path: media_file.path,
+      media_item_id: media_file.media_item_id
+    )
+
+    # Parse the filename to extract season/episode info
+    parsed = FileParser.parse(Path.basename(media_file.path))
+
+    case parsed do
+      %{type: :tv_show, season: season, episodes: episodes}
+      when not is_nil(season) and not is_nil(episodes) ->
+        # Try to find the episode in the database
+        # For multi-episode files, use the first episode
+        episode_number = List.first(episodes)
+
+        case Mydia.Media.get_episode_by_number(media_file.media_item_id, season, episode_number) do
+          nil ->
+            # Episode doesn't exist yet, try to fetch it from TMDB
+            Logger.info("Episode not found, attempting to fetch from TMDB",
+              media_item_id: media_file.media_item_id,
+              season: season,
+              episode: episode_number
+            )
+
+            # Fetch the media item to get TMDB ID
+            media_item = Mydia.Media.get_media_item!(media_file.media_item_id)
+
+            if media_item.tmdb_id do
+              # Fetch season data from TMDB
+              case Metadata.fetch_season(
+                     metadata_config,
+                     to_string(media_item.tmdb_id),
+                     season
+                   ) do
+                {:ok, season_data} ->
+                  # Create episodes for this season
+                  create_episodes_from_season(media_item, season_data)
+
+                  # Try to find the episode again
+                  case Mydia.Media.get_episode_by_number(
+                         media_file.media_item_id,
+                         season,
+                         episode_number
+                       ) do
+                    nil ->
+                      Logger.warning("Episode still not found after TMDB fetch",
+                        media_item_id: media_file.media_item_id,
+                        season: season,
+                        episode: episode_number
+                      )
+
+                      false
+
+                    episode ->
+                      associate_file_with_episode(media_file, episode)
+                  end
+
+                {:error, reason} ->
+                  Logger.warning("Failed to fetch season from TMDB",
+                    media_item_id: media_file.media_item_id,
+                    season: season,
+                    reason: reason
+                  )
+
+                  false
+              end
+            else
+              Logger.warning("Media item has no TMDB ID, cannot fetch episodes",
+                media_item_id: media_file.media_item_id
+              )
+
+              false
+            end
+
+          episode ->
+            # Episode exists, associate the file with it
+            associate_file_with_episode(media_file, episode)
+        end
+
+      _ ->
+        Logger.debug("Could not parse season/episode info from filename",
+          path: media_file.path
+        )
+
+        false
+    end
+  rescue
+    error ->
+      Logger.error("Exception while fixing orphaned TV file",
+        path: media_file.path,
+        error: Exception.message(error)
+      )
+
+      false
+  end
+
+  # Re-validates a TV file's episode association by re-parsing the filename
+  defp revalidate_tv_file_association(media_file) do
+    # Parse the filename to see what season/episode it claims to be
+    parsed = FileParser.parse(Path.basename(media_file.path))
+
+    case parsed do
+      %{type: :tv_show, season: season, episodes: episodes}
+      when not is_nil(season) and not is_nil(episodes) ->
+        # Get the first episode number (for multi-episode files)
+        episode_number = List.first(episodes)
+
+        # Check if this matches the current association
+        if media_file.episode.season_number != season or
+             media_file.episode.episode_number != episode_number do
+          Logger.info("File association mismatch detected",
+            path: media_file.path,
+            current_season: media_file.episode.season_number,
+            current_episode: media_file.episode.episode_number,
+            parsed_season: season,
+            parsed_episode: episode_number
+          )
+
+          # Try to find the correct episode
+          case Mydia.Media.get_episode_by_number(
+                 media_file.episode.media_item_id,
+                 season,
+                 episode_number
+               ) do
+            nil ->
+              Logger.warning("Correct episode not found, keeping current association",
+                media_item_id: media_file.episode.media_item_id,
+                season: season,
+                episode: episode_number
+              )
+
+              false
+
+            new_episode ->
+              # Update the association
+              case Library.update_media_file(media_file, %{episode_id: new_episode.id}) do
+                {:ok, _updated_file} ->
+                  Logger.info("Updated file association",
+                    path: media_file.path,
+                    old_episode:
+                      "S#{media_file.episode.season_number}E#{media_file.episode.episode_number}",
+                    new_episode: "S#{new_episode.season_number}E#{new_episode.episode_number}"
+                  )
+
+                  true
+
+                {:error, reason} ->
+                  Logger.error("Failed to update file association",
+                    path: media_file.path,
+                    reason: reason
+                  )
+
+                  false
+              end
+          end
+        else
+          # Association is correct
+          false
+        end
+
+      _ ->
+        # Could not parse or not a TV show file
+        false
+    end
+  rescue
+    error ->
+      Logger.error("Exception while revalidating file association",
+        path: media_file.path,
+        error: Exception.message(error)
+      )
+
+      false
+  end
+
+  # Associates a media file with an episode
+  # For TV shows, files should have episode_id set, not media_item_id
+  # So we need to clear media_item_id when setting episode_id
+  defp associate_file_with_episode(media_file, episode) do
+    case Library.update_media_file(media_file, %{episode_id: episode.id, media_item_id: nil}) do
+      {:ok, _updated_file} ->
+        Logger.info("Associated file with episode",
+          path: media_file.path,
+          episode: "S#{episode.season_number}E#{episode.episode_number}"
+        )
+
+        true
+
+      {:error, reason} ->
+        Logger.error("Failed to associate file with episode",
+          path: media_file.path,
+          reason: inspect(reason)
+        )
+
+        false
+    end
+  rescue
+    error ->
+      Logger.error("Exception while associating file with episode",
+        path: media_file.path,
+        error: Exception.message(error)
+      )
+
+      false
+  end
+
+  # Creates episodes from TMDB season data
+  defp create_episodes_from_season(media_item, season_data) do
+    episodes = Map.get(season_data, :episodes, [])
+    season_number = Map.get(season_data, :season_number)
+
+    Enum.each(episodes, fn episode_data ->
+      # Check if episode already exists
+      existing_episode =
+        Mydia.Media.get_episode_by_number(
+          media_item.id,
+          season_number,
+          episode_data.episode_number
+        )
+
+      if is_nil(existing_episode) do
+        attrs = %{
+          media_item_id: media_item.id,
+          season_number: season_number,
+          episode_number: episode_data.episode_number,
+          title: episode_data.name,
+          air_date: parse_air_date(episode_data.air_date),
+          metadata: episode_data,
+          monitored: true
+        }
+
+        case Mydia.Media.create_episode(attrs) do
+          {:ok, _episode} ->
+            Logger.debug("Created episode from season data",
+              media_item_id: media_item.id,
+              season: season_number,
+              episode: episode_data.episode_number
+            )
+
+          {:error, reason} ->
+            Logger.warning("Failed to create episode from season data",
+              media_item_id: media_item.id,
+              season: season_number,
+              episode: episode_data.episode_number,
+              reason: reason
+            )
+        end
+      end
+    end)
+  rescue
+    error ->
+      Logger.error("Exception while creating episodes from season data",
+        media_item_id: media_item.id,
+        error: Exception.message(error)
+      )
+  end
+
+  # Parses an air date string
+  defp parse_air_date(nil), do: nil
+  defp parse_air_date(""), do: nil
+
+  defp parse_air_date(date_string) when is_binary(date_string) do
+    case Date.from_iso8601(date_string) do
+      {:ok, date} -> date
+      _ -> nil
+    end
+  end
+
+  defp parse_air_date(_), do: nil
 
   # Extract technical metadata from file and update the media_file record
   defp extract_and_update_file_metadata(media_file, file_info) do
