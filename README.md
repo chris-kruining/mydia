@@ -114,17 +114,17 @@ services:
       - GUARDIAN_SECRET_KEY=your-guardian-secret-key-here  # Required: generate with openssl rand -base64 48
       - PHX_HOST=localhost  # Change to your domain
       - PORT=4000
-      - MOVIES_PATH=/media/movies
-      - TV_PATH=/media/tv
+      - MOVIES_PATH=/media/library/movies
+      - TV_PATH=/media/library/tv
     volumes:
       - /path/to/mydia/config:/config
-      - /path/to/your/movies:/media/movies
-      - /path/to/your/tv:/media/tv
-      - /path/to/your/downloads:/media/downloads
+      - /path/to/your/media:/media  # Single mount enables hardlinks between downloads and libraries
     ports:
       - 4000:4000
     restart: unless-stopped
 ```
+
+> **Note:** This example uses a single `/media` mount to enable hardlink support. Organize your host directory with subdirectories like `/path/to/your/media/downloads`, `/path/to/your/media/library/movies`, and `/path/to/your/media/library/tv`. Configure your download client to save to `/media/downloads`.
 
 ### Docker CLI
 
@@ -138,16 +138,16 @@ docker run -d \
   -e GUARDIAN_SECRET_KEY=your-guardian-secret-key-here \
   -e PHX_HOST=localhost \
   -e PORT=4000 \
-  -e MOVIES_PATH=/media/movies \
-  -e TV_PATH=/media/tv \
+  -e MOVIES_PATH=/media/library/movies \
+  -e TV_PATH=/media/library/tv \
   -p 4000:4000 \
   -v /path/to/mydia/config:/config \
-  -v /path/to/your/movies:/media/movies \
-  -v /path/to/your/tv:/media/tv \
-  -v /path/to/your/downloads:/media/downloads \
+  -v /path/to/your/media:/media \
   --restart unless-stopped \
   ghcr.io/getmydia/mydia:latest
 ```
+
+> **Note:** This example uses a single `/media` mount to enable hardlink support. Configure your download client to save to `/media/downloads`.
 
 ## 📋 Parameters
 
@@ -183,6 +183,43 @@ See the **[Environment Variables Reference](#-environment-variables-reference)**
 | `/media/movies` | Movies library location |
 | `/media/tv` | TV shows library location |
 | `/media/downloads` | Download client output directory (optional) |
+
+> **💡 Hardlink Support for Efficient Storage**
+>
+> For optimal storage efficiency, mydia uses hardlinks by default when importing media. Hardlinks allow the same file to appear in both your download folder and library folder without consuming additional disk space.
+>
+> **To enable hardlinks**, ensure your downloads and library directories are on the same filesystem by using a single parent volume mount:
+>
+> ```yaml
+> volumes:
+>   - /path/to/mydia/config:/config
+>   - /path/to/your/media:/media  # Single mount for downloads AND libraries
+> ```
+>
+> Then organize your host directory structure like:
+> ```
+> /path/to/your/media/
+>   ├── downloads/          # Download client output
+>   ├── library/
+>   │   ├── movies/         # Movies library
+>   │   └── tv/             # TV library
+> ```
+>
+> And configure environment variables:
+> ```yaml
+> environment:
+>   - MOVIES_PATH=/media/library/movies
+>   - TV_PATH=/media/library/tv
+> ```
+>
+> Configure your download client (qBittorrent, Transmission, etc.) to save files to `/media/downloads`.
+>
+> **Benefits:**
+> - Instant file operations (no data copying)
+> - Zero duplicate storage space
+> - Files remain seeding in your download client while available in your library
+>
+> **Note:** If your downloads and libraries must be on different filesystems, mydia will automatically fall back to copying files. This works fine but uses more storage space and takes longer.
 
 ## 👤 User / Group Identifiers
 
