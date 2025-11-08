@@ -1,10 +1,10 @@
 ---
 id: task-114.1
 title: Implement hardlink support for efficient media imports
-status: In Progress
+status: Done
 assignee: []
 created_date: '2025-11-08 01:00'
-updated_date: '2025-11-08 01:31'
+updated_date: '2025-11-08 01:36'
 labels:
   - enhancement
   - file-handling

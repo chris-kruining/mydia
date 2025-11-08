@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - assistant
 created_date: '2025-11-08 00:59'
-updated_date: '2025-11-08 01:30'
+updated_date: '2025-11-08 01:36'
 labels:
   - enhancement
   - quality
@@ -111,4 +111,21 @@ Work through each subtask sequentially, building on previous features. The order
 - Task 114.2: TRaSH-compatible file naming
 - Task 114.4: Custom Formats system
 - Task 114.5: Enhanced upgrade logic
+
+## Task 114.1 Completed
+
+Successfully implemented hardlink support for efficient media imports (commit: 3568df5).
+
+### Implementation Summary:
+- Added `same_filesystem?/2` helper to detect if paths are on same device using `File.stat/1`
+- Updated `copy_or_move_file/3` with priority: hardlink > move > copy
+- Hardlinks enabled by default via `use_hardlinks: true` in download import job
+- Graceful fallback to copy if hardlink fails
+- Comprehensive debug logging for filesystem checks and operations
+
+### Benefits:
+- Instant file operations (no data copying)
+- No duplicate storage space consumption
+- Same file data appears in both download and library folders
+- Automatic fallback ensures reliability across different filesystem configurations
 <!-- SECTION:NOTES:END -->
