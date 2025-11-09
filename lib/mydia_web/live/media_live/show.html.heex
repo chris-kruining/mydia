@@ -1,4 +1,9 @@
-<Layouts.app flash={@flash}>
+<Layouts.app
+  flash={@flash}
+  movie_count={@movie_count}
+  tv_show_count={@tv_show_count}
+  downloads_count={@downloads_count}
+>
   <%!-- Hero Section with Backdrop --%>
   <div class="relative -mx-4 -mt-4 mb-4">
     <%= if backdrop_url = get_backdrop_url(@media_item) do %>
@@ -32,6 +37,31 @@
 
           <%!-- Quick Actions --%>
           <div class="flex flex-col gap-2">
+            <%!-- Play Button (for content with media files) --%>
+            <%= if @media_item.type == "movie" && length(@media_item.media_files) > 0 do %>
+              <.link
+                navigate={~p"/play/movie/#{@media_item.id}"}
+                class="btn btn-primary btn-block"
+              >
+                <.icon name="hero-play-circle-solid" class="w-5 h-5" /> Play Movie
+              </.link>
+
+              <div class="divider my-1"></div>
+            <% end %>
+
+            <%!-- Play Next Button (for TV shows with next episode) --%>
+            <%= if @media_item.type == "tv_show" && @next_episode do %>
+              <.link
+                navigate={~p"/play/episode/#{@next_episode.id}"}
+                class="btn btn-primary btn-block"
+              >
+                <.icon name="hero-play-circle-solid" class="w-5 h-5" />
+                {next_episode_button_text(@next_episode_state)}
+              </.link>
+
+              <div class="divider my-1"></div>
+            <% end %>
+
             <button
               type="button"
               phx-click="auto_search_download"
@@ -375,6 +405,16 @@
                               </td>
                               <td>
                                 <div class="flex gap-1">
+                                  <%!-- Play button (if episode has media files) --%>
+                                  <%= if length(episode.media_files) > 0 do %>
+                                    <.link
+                                      navigate={~p"/play/episode/#{episode.id}"}
+                                      class="btn btn-success btn-xs"
+                                      title="Play episode"
+                                    >
+                                      <.icon name="hero-play-solid" class="w-3 h-3" />
+                                    </.link>
+                                  <% end %>
                                   <button
                                     type="button"
                                     phx-click="auto_search_episode"

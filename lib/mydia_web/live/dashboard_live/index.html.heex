@@ -1,4 +1,9 @@
-<Layouts.app flash={@flash}>
+<Layouts.app
+  flash={@flash}
+  movie_count={@movie_count}
+  tv_show_count={@tv_show_count}
+  downloads_count={@downloads_count}
+>
   <div class="mb-6">
     <h1 class="text-3xl font-bold mb-2">Welcome to Mydia</h1>
     <p class="text-base-content/70">Your personal media management system</p>
@@ -99,6 +104,28 @@
           </div>
         </div>
       </.link>
+
+      <%= if @pending_requests_count > 0 do %>
+        <.link
+          navigate={~p"/admin/requests"}
+          class="card bg-base-100 shadow-sm hover:shadow-md transition-shadow border-2 border-warning"
+        >
+          <div class="card-body flex-row items-center gap-4">
+            <div class="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center">
+              <.icon name="hero-inbox-stack" class="w-6 h-6 text-warning" />
+            </div>
+            <div class="flex-1">
+              <h3 class="font-semibold">Pending Requests</h3>
+              <p class="text-sm text-base-content/60">
+                {@pending_requests_count} request(s) awaiting review
+              </p>
+            </div>
+            <%= if @pending_requests_count > 0 do %>
+              <div class="badge badge-warning">{@pending_requests_count}</div>
+            <% end %>
+          </div>
+        </.link>
+      <% end %>
     </div>
   </div>
   

@@ -29,4 +29,7 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Alpine.js x-cloak - prevents flash of unstyled content */
+[x-cloak] { display: none !important; }
+
 /* This file is for your main application CSS */

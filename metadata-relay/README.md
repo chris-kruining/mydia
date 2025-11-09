@@ -138,9 +138,97 @@ fly secrets unset SECRET_NAME
 
 ## Deployment
 
-### Fly.io Deployment
+### Automated Releases (Recommended)
 
-The service is designed to be deployed on Fly.io using Elixir releases.
+The metadata-relay service uses GitHub Actions for automated CI/CD. When you push a version tag, it automatically:
+
+1. ✅ Runs tests and builds the Docker image
+2. 📦 Pushes the image to GitHub Container Registry (GHCR)
+3. 🚀 Deploys to Fly.io production
+4. 📝 Creates a GitHub release with notes
+
+#### Creating a Release
+
+To release a new version:
+
+1. **Update the version** in `mix.exs` (if desired):
+   ```elixir
+   def project do
+     [
+       version: "0.2.0",  # Bump this version
+       # ...
+     ]
+   end
+   ```
+
+2. **Commit your changes**:
+   ```bash
+   git add .
+   git commit -m "feat: prepare metadata-relay v0.2.0 release"
+   ```
+
+3. **Create and push a version tag**:
+   ```bash
+   # Format: metadata-relay-vX.Y.Z
+   git tag metadata-relay-v0.2.0
+   git push origin metadata-relay-v0.2.0
+   ```
+
+4. **Monitor the release**:
+   - Go to GitHub Actions to watch the build and deployment
+   - The workflow will automatically deploy to Fly.io
+   - A GitHub release will be created with deployment details
+
+#### Prerequisites for Automated Releases
+
+**One-time setup** - Add the Fly.io API token to GitHub secrets:
+
+Using the GitHub CLI (recommended):
+```bash
+# Quick one-liner setup
+flyctl auth token | gh secret set FLY_API_TOKEN
+
+# Verify it was set
+gh secret list
+```
+
+Or manually via the web UI:
+1. Get token: `flyctl auth token`
+2. Go to: Settings → Secrets and variables → Actions
+3. Add secret: Name=`FLY_API_TOKEN`, Value=token from step 1
+
+**That's it!** All releases will now deploy automatically.
+
+**Validate your setup:**
+```bash
+# Run the validation script to check everything is configured
+cd metadata-relay
+./scripts/validate-release-setup.sh
+```
+
+**Helpful commands:**
+```bash
+# Monitor a release in real-time
+gh run watch
+
+# View recent workflow runs
+gh run list --workflow=metadata-relay-release.yml
+
+# Check Fly.io deployment logs
+flyctl logs -a metadata-relay -f
+```
+
+#### What Gets Built
+
+Each release creates multi-platform Docker images:
+- **Platforms**: `linux/amd64`, `linux/arm64`
+- **Registry**: GitHub Container Registry (GHCR)
+- **Tags**: `latest`, `X.Y.Z`, `X.Y`, `X` (semantic versioning)
+- **Access**: `docker pull ghcr.io/yourusername/mydia/metadata-relay:latest`
+
+### Manual Deployment (Fly.io)
+
+For manual deployments or initial setup, you can deploy directly using the Fly CLI.
 
 #### Prerequisites
 
@@ -496,6 +584,28 @@ A `200 OK` status indicates the service is running and able to respond to reques
 4. Test manually by running the server and making HTTP requests
 5. Check logs for any warnings or errors
 6. Verify cache behavior for frequently accessed endpoints
+
+## Continuous Integration
+
+The project uses GitHub Actions for automated testing and quality checks:
+
+### CI Workflow (Runs on every push/PR)
+
+Automatically runs on changes to the `metadata-relay/` directory:
+- ✅ **Tests**: Full test suite with coverage reporting
+- 🔍 **Code Quality**: Unused dependency checks, compilation warnings check
+- 📝 **Formatting**: Ensures code follows project standards
+- 🐳 **Docker Build**: Verifies Docker image builds successfully
+
+### Release Workflow (Runs on version tags)
+
+Triggered when pushing tags matching `metadata-relay-v*`:
+- 🏗️ **Build**: Creates multi-platform Docker images (amd64, arm64)
+- 📦 **Publish**: Pushes to GitHub Container Registry
+- 🚀 **Deploy**: Automatically deploys to Fly.io production
+- 📝 **Release**: Creates GitHub release with deployment notes
+
+All workflows must pass before code can be merged, ensuring production stability.
 
 ## Status
 

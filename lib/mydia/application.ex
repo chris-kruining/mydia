@@ -27,7 +27,9 @@ defmodule Mydia.Application do
         Mydia.Metadata.Provider.Registry,
         Mydia.Metadata.Cache,
         {Task.Supervisor, name: Mydia.TaskSupervisor},
-        Mydia.Hooks.Manager
+        Mydia.Hooks.Manager,
+        {Registry, keys: :unique, name: Mydia.Streaming.HlsSessionRegistry},
+        Mydia.Streaming.HlsSessionSupervisor
       ] ++
         client_health_children() ++
         indexer_health_children() ++
@@ -55,6 +57,8 @@ defmodule Mydia.Application do
         ensure_default_quality_profiles()
         validate_library_paths()
         Mydia.Accounts.DefaultAdmin.ensure_admin_exists()
+        # Clean up stale HLS session directories
+        cleanup_stale_hls_sessions()
       end
 
       {:ok, pid}
@@ -222,6 +226,20 @@ defmodule Mydia.Application do
           {:error, reason} ->
             {:error, path, media_type, "path exists but is not readable: #{inspect(reason)}"}
         end
+    end
+  end
+
+  defp cleanup_stale_hls_sessions do
+    case Mydia.Streaming.HlsCleanup.cleanup_stale_sessions() do
+      {:ok, 0} ->
+        :ok
+
+      {:ok, count} ->
+        IO.puts("✓ Cleaned up #{count} stale HLS session directory(ies)")
+
+      {:error, _reason} ->
+        # Don't fail startup on cleanup errors
+        :ok
     end
   end
 end

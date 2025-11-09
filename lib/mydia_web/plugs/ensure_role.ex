@@ -6,6 +6,7 @@ defmodule MydiaWeb.Plugs.EnsureRole do
   - admin: Full access (can do everything)
   - user: Normal user access (can manage own content)
   - readonly: Read-only access (cannot modify)
+  - guest: Limited access (can view and request content)
 
   Usage:
       plug MydiaWeb.Plugs.EnsureRole, :admin
@@ -17,9 +18,10 @@ defmodule MydiaWeb.Plugs.EnsureRole do
   alias Mydia.Auth.Guardian
 
   @role_hierarchy %{
-    "admin" => 3,
-    "user" => 2,
-    "readonly" => 1
+    "admin" => 4,
+    "user" => 3,
+    "readonly" => 2,
+    "guest" => 1
   }
 
   def init(required_roles) when is_list(required_roles), do: required_roles

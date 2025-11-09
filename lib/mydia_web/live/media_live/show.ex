@@ -45,6 +45,9 @@ defmodule MydiaWeb.MediaLive.Show do
           MapSet.new()
       end
 
+    # Load next episode for TV shows
+    {next_episode, next_episode_state} = load_next_episode(media_item, socket)
+
     {:ok,
      socket
      |> assign(:media_item, media_item)
@@ -87,6 +90,9 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:renaming_files, false)
      # Season expanded/collapsed state
      |> assign(:expanded_seasons, expanded_seasons)
+     # Next episode for TV shows
+     |> assign(:next_episode, next_episode)
+     |> assign(:next_episode_state, next_episode_state)
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -1635,5 +1641,45 @@ defmodule MydiaWeb.MediaLive.Show do
     )
 
     {:ok, success_count, error_count}
+  end
+
+  # Load next episode to watch for TV shows
+  defp load_next_episode(media_item, socket) do
+    if media_item.type == "tv_show" do
+      user_id = socket.assigns.current_user.id
+
+      case Mydia.Playback.get_next_episode(media_item.id, user_id) do
+        {:continue, episode} -> {episode, :continue}
+        {:next, episode} -> {episode, :next}
+        {:start, episode} -> {episode, :start}
+        :all_watched -> {nil, :all_watched}
+        nil -> {nil, nil}
+      end
+    else
+      {nil, nil}
+    end
+  end
+
+  # Get button text based on watch state
+  defp next_episode_button_text(:continue), do: "Continue Watching"
+  defp next_episode_button_text(:next), do: "Play Next Episode"
+  defp next_episode_button_text(:start), do: "Start Watching"
+  defp next_episode_button_text(_), do: "Play"
+
+  # Format episode number as S01E05
+  defp format_episode_number(episode) do
+    "S#{String.pad_leading(to_string(episode.season_number), 2, "0")}E#{String.pad_leading(to_string(episode.episode_number), 2, "0")}"
+  end
+
+  # Get episode thumbnail from metadata
+  defp get_episode_thumbnail(episode) do
+    case episode.metadata do
+      %{"still_path" => path} when is_binary(path) ->
+        "https://image.tmdb.org/t/p/w300#{path}"
+
+      _ ->
+        # Use a placeholder or the series poster
+        nil
+    end
   end
 end

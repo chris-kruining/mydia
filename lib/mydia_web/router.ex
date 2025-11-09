@@ -12,6 +12,7 @@ defmodule MydiaWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug :fetch_session
   end
 
   # Authentication pipeline - verifies JWT tokens from session or header
@@ -65,7 +66,10 @@ defmodule MydiaWeb.Router do
     pipe_through [:browser, :auth, :require_authenticated]
 
     live_session :authenticated,
-      on_mount: [{MydiaWeb.Live.UserAuth, :ensure_authenticated}] do
+      on_mount: [
+        {MydiaWeb.Live.UserAuth, :ensure_authenticated},
+        {MydiaWeb.Live.UserAuth, :load_navigation_data}
+      ] do
       live "/", DashboardLive.Index, :index
       live "/media", MediaLive.Index, :index
       live "/media/:id", MediaLive.Show, :show
@@ -80,6 +84,14 @@ defmodule MydiaWeb.Router do
       live "/downloads", DownloadsLive.Index, :index
       live "/calendar", CalendarLive.Index, :index
       live "/activity", ActivityLive.Index, :index
+
+      # Playback routes
+      live "/play/:type/:id", PlaybackLive.Show, :show
+
+      # Guest request routes
+      live "/request/movie", RequestMediaLive.Index, :request_movie
+      live "/request/series", RequestMediaLive.Index, :request_series
+      live "/requests", MyRequestsLive.Index, :index
     end
   end
 
@@ -88,11 +100,16 @@ defmodule MydiaWeb.Router do
     pipe_through [:browser, :auth, :require_authenticated, :require_admin]
 
     live_session :admin,
-      on_mount: [{MydiaWeb.Live.UserAuth, :ensure_authenticated}] do
+      on_mount: [
+        {MydiaWeb.Live.UserAuth, :ensure_authenticated},
+        {MydiaWeb.Live.UserAuth, :load_navigation_data}
+      ] do
       live "/", AdminStatusLive.Index, :index
       live "/status", AdminStatusLive.Index, :index
       live "/config", AdminConfigLive.Index, :index
       live "/jobs", JobsLive.Index, :index
+      live "/requests", AdminRequestsLive.Index, :index
+      live "/users", AdminUsersLive.Index, :index
     end
   end
 
@@ -116,6 +133,26 @@ defmodule MydiaWeb.Router do
     # Media items
     get "/media/:id", MediaController, :show
     post "/media/:id/match", MediaController, :match
+
+    # Streaming
+    get "/stream/movie/:id", StreamController, :stream_movie
+    get "/stream/episode/:id", StreamController, :stream_episode
+    get "/stream/:id", StreamController, :stream
+
+    # Playback progress
+    get "/playback/movie/:id", PlaybackController, :show_movie
+    get "/playback/episode/:id", PlaybackController, :show_episode
+    post "/playback/movie/:id", PlaybackController, :update_movie
+    post "/playback/episode/:id", PlaybackController, :update_episode
+
+    # HLS streaming
+    post "/hls/start", HlsController, :start_session
+    delete "/hls/:session_id", HlsController, :terminate_session
+    get "/hls/:session_id/index.m3u8", HlsController, :master_playlist
+    get "/hls/:session_id/:track_id/index.m3u8", HlsController, :variant_playlist
+    get "/hls/:session_id/:track_id/:segment", HlsController, :segment
+    # Support FFmpeg's flat structure (segments in root directory)
+    get "/hls/:session_id/:segment", HlsController, :root_segment
   end
 
   # API routes - admin only

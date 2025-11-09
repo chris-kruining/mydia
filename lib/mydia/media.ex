@@ -299,6 +299,40 @@ defmodule Mydia.Media do
   end
 
   @doc """
+  Gets the next episode for the given episode.
+  Returns the next episode in the same season if available,
+  otherwise returns the first episode of the next season.
+  Returns nil if there is no next episode.
+  """
+  def get_next_episode(%Episode{} = episode, opts \\ []) do
+    # Try to get next episode in same season first
+    next_in_season =
+      Episode
+      |> where([e], e.media_item_id == ^episode.media_item_id)
+      |> where([e], e.season_number == ^episode.season_number)
+      |> where([e], e.episode_number > ^episode.episode_number)
+      |> order_by([e], asc: e.episode_number)
+      |> limit(1)
+      |> maybe_preload(opts[:preload])
+      |> Repo.one()
+
+    case next_in_season do
+      nil ->
+        # No more episodes in current season, try next season
+        Episode
+        |> where([e], e.media_item_id == ^episode.media_item_id)
+        |> where([e], e.season_number > ^episode.season_number)
+        |> order_by([e], asc: e.season_number, asc: e.episode_number)
+        |> limit(1)
+        |> maybe_preload(opts[:preload])
+        |> Repo.one()
+
+      episode ->
+        episode
+    end
+  end
+
+  @doc """
   Creates an episode.
   """
   def create_episode(attrs \\ %{}) do

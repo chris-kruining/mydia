@@ -74,10 +74,12 @@ defmodule Mydia.MediaFixtures do
     {:ok, media_file} =
       attrs
       |> Enum.into(%{
-        path: "/media/test/file-#{System.unique_integer([:positive])}.mkv",
+        path: "/media/test/file-#{System.unique_integer([:positive])}.mp4",
         size: 1_000_000_000,
         resolution: "1080p",
-        codec: "h264"
+        codec: "h264",
+        audio_codec: "aac",
+        metadata: %{"container" => "mp4"}
       })
       |> Mydia.Library.create_media_file()
 

@@ -1,4 +1,4 @@
-FROM elixir:1.16-alpine AS builder
+FROM elixir:1.18-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache build-base git
@@ -25,7 +25,7 @@ RUN MIX_ENV=prod mix compile
 RUN MIX_ENV=prod mix release
 
 # Start a new stage for the final image
-FROM alpine:3.19
+FROM alpine:3.22
 
 # Install runtime dependencies
 RUN apk add --no-cache libstdc++ openssl ncurses-libs curl

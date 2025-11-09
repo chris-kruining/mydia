@@ -1,0 +1,166 @@
+<Layouts.app
+  flash={@flash}
+  movie_count={@movie_count}
+  tv_show_count={@tv_show_count}
+  downloads_count={@downloads_count}
+>
+  <div class="max-w-7xl mx-auto">
+    <%!-- Header --%>
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold">My Requests</h1>
+        <p class="text-base-content/70 mt-1">
+          View the status of your media requests
+        </p>
+      </div>
+      <div class="flex gap-2">
+        <.link navigate={~p"/request/movie"} class="btn btn-primary btn-sm">
+          <.icon name="hero-plus" class="w-4 h-4" /> Request Movie
+        </.link>
+        <.link navigate={~p"/request/series"} class="btn btn-primary btn-sm">
+          <.icon name="hero-plus" class="w-4 h-4" /> Request Series
+        </.link>
+      </div>
+    </div>
+
+    <%!-- Filter Tabs --%>
+    <div role="tablist" class="tabs tabs-boxed mb-6">
+      <button
+        role="tab"
+        class={"tab " <> if(@filter_status == "all", do: "tab-active", else: "")}
+        phx-click="filter"
+        phx-value-status="all"
+      >
+        All
+      </button>
+      <button
+        role="tab"
+        class={"tab " <> if(@filter_status == "pending", do: "tab-active", else: "")}
+        phx-click="filter"
+        phx-value-status="pending"
+      >
+        Pending
+      </button>
+      <button
+        role="tab"
+        class={"tab " <> if(@filter_status == "approved", do: "tab-active", else: "")}
+        phx-click="filter"
+        phx-value-status="approved"
+      >
+        Approved
+      </button>
+      <button
+        role="tab"
+        class={"tab " <> if(@filter_status == "rejected", do: "tab-active", else: "")}
+        phx-click="filter"
+        phx-value-status="rejected"
+      >
+        Rejected
+      </button>
+    </div>
+
+    <%!-- Empty State --%>
+    <%= if @requests == [] do %>
+      <div class="text-center py-12">
+        <.icon name="hero-inbox" class="w-16 h-16 mx-auto text-base-content/30 mb-4" />
+        <h3 class="text-lg font-semibold mb-2">No requests found</h3>
+        <p class="text-base-content/70 mb-6">
+          <%= if @filter_status == "all" do %>
+            You haven't submitted any requests yet. Start by searching for media to request!
+          <% else %>
+            No {status_text(@filter_status)} requests found.
+          <% end %>
+        </p>
+        <div class="flex gap-2 justify-center">
+          <.link navigate={~p"/request/movie"} class="btn btn-primary">
+            <.icon name="hero-plus" class="w-5 h-5" /> Request Movie
+          </.link>
+          <.link navigate={~p"/request/series"} class="btn btn-primary">
+            <.icon name="hero-plus" class="w-5 h-5" /> Request Series
+          </.link>
+        </div>
+      </div>
+    <% else %>
+      <%!-- Requests List --%>
+      <div class="space-y-4">
+        <%= for request <- @requests do %>
+          <div class="card bg-base-100 shadow-lg">
+            <div class="card-body">
+              <div class="flex gap-4">
+                <div class="flex-1">
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <h3 class="card-title">
+                        {request.title}
+                        <%= if request.year do %>
+                          <span class="text-base-content/70 font-normal">({request.year})</span>
+                        <% end %>
+                      </h3>
+                      <div class="flex items-center gap-2 mt-1">
+                        <span class={"badge badge-sm " <> status_badge_class(request.status)}>
+                          {status_text(request.status)}
+                        </span>
+                        <span class="badge badge-sm badge-ghost">
+                          {String.replace(request.media_type, "_", " ") |> String.capitalize()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <%!-- Request Details --%>
+                  <div class="mt-4 space-y-2 text-sm">
+                    <div class="flex items-center gap-2 text-base-content/70">
+                      <.icon name="hero-calendar" class="w-4 h-4" />
+                      <span>Requested on {format_date(request.inserted_at)}</span>
+                    </div>
+                    <%= if request.requester_notes do %>
+                      <div class="flex items-start gap-2 text-base-content/70">
+                        <.icon name="hero-chat-bubble-left-right" class="w-4 h-4 mt-0.5" />
+                        <span>{request.requester_notes}</span>
+                      </div>
+                    <% end %>
+                    <%= if request.status == "approved" do %>
+                      <div class="flex items-start gap-2 text-success">
+                        <.icon name="hero-check-circle" class="w-4 h-4 mt-0.5" />
+                        <div>
+                          <div>Approved on {format_date(request.approved_at)}</div>
+                          <%= if request.admin_notes do %>
+                            <div class="text-xs mt-1">Admin notes: {request.admin_notes}</div>
+                          <% end %>
+                        </div>
+                      </div>
+                      <%= if request.media_item do %>
+                        <div class="mt-2">
+                          <.link
+                            navigate={~p"/media/#{request.media_item.id}"}
+                            class="btn btn-sm btn-success"
+                          >
+                            <.icon name="hero-arrow-top-right-on-square" class="w-4 h-4" />
+                            View in Library
+                          </.link>
+                        </div>
+                      <% end %>
+                    <% end %>
+                    <%= if request.status == "rejected" do %>
+                      <div class="flex items-start gap-2 text-error">
+                        <.icon name="hero-x-circle" class="w-4 h-4 mt-0.5" />
+                        <div>
+                          <div>Rejected on {format_date(request.rejected_at)}</div>
+                          <%= if request.rejection_reason do %>
+                            <div class="text-xs mt-1">Reason: {request.rejection_reason}</div>
+                          <% end %>
+                          <%= if request.admin_notes do %>
+                            <div class="text-xs mt-1">Admin notes: {request.admin_notes}</div>
+                          <% end %>
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</Layouts.app>

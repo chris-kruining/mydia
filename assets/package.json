@@ -10,6 +10,8 @@
     "populate-media": "node populate-media.js"
   },
   "dependencies": {
+    "alpinejs": "^3.15.1",
+    "hls.js": "^1.5.15",
     "phoenix": "file:../deps/phoenix",
     "phoenix_html": "file:../deps/phoenix_html",
     "phoenix_live_view": "file:../deps/phoenix_live_view"

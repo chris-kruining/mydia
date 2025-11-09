@@ -95,6 +95,21 @@ config :mydia, Oban,
 # Events older than this will be automatically deleted
 config :mydia, :event_retention_days, 90
 
+# HLS Streaming configuration
+# Backend can be :ffmpeg or :membrane
+# :ffmpeg is the default as it supports more codecs and is more reliable
+# :membrane is experimental and has limited codec support but provides more granular control
+config :mydia, :streaming,
+  hls_backend: :ffmpeg,
+  # Session timeout (30 minutes of inactivity)
+  session_timeout: :timer.minutes(30),
+  # Temp directory for HLS segments
+  temp_base_dir: "/tmp/mydia-hls",
+  # Transcoding policy: :copy_when_compatible or :always
+  # :copy_when_compatible - Use stream copy for compatible codecs (H.264/AAC) - 10-100x faster, zero quality loss
+  # :always - Always re-encode (original behavior, slower but ensures consistent output)
+  transcode_policy: :copy_when_compatible
+
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured
 config :ueberauth, Ueberauth, providers: []

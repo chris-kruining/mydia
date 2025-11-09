@@ -1,0 +1,563 @@
+defmodule Mydia.Streaming.FfmpegHlsTranscoder do
+  @moduledoc """
+  FFmpeg-based HLS transcoding backend.
+
+  This module provides a simple, robust alternative to the Membrane Framework for
+  HLS transcoding. It uses FFmpeg directly to transcode video files to HLS format,
+  supporting virtually all codecs and container formats.
+
+  ## Benefits over Membrane
+
+  - **Universal codec support**: Works with any format FFmpeg supports (H264, HEVC, VP9, AAC, EAC3, DTS, AC3, etc.)
+  - **Production-ready**: FFmpeg is battle-tested and widely used
+  - **Simple implementation**: Single command vs complex pipeline state
+  - **Clear error messages**: FFmpeg provides detailed error output
+
+  ## Usage
+
+      {:ok, pid} = FfmpegHlsTranscoder.start_transcoding(
+        input_path: "/path/to/video.mkv",
+        output_dir: "/tmp/hls-session-123",
+        on_progress: fn progress -> IO.inspect(progress) end,
+        on_complete: fn -> IO.puts("Done!") end,
+        on_error: fn error -> IO.puts("Error: \#{error}") end
+      )
+
+      # Stop transcoding
+      FfmpegHlsTranscoder.stop_transcoding(pid)
+
+  ## Process Management
+
+  The transcoder runs as a GenServer that spawns and monitors an FFmpeg process.
+  It tracks the process state and can report progress by parsing FFmpeg output.
+  """
+
+  use GenServer
+  require Logger
+
+  @type transcode_opts :: [
+          input_path: String.t(),
+          output_dir: String.t(),
+          on_progress: (map() -> any()) | nil,
+          on_complete: (-> any()) | nil,
+          on_error: (String.t() -> any()) | nil,
+          media_file: Mydia.Library.MediaFile.t() | nil,
+          video_codec: String.t(),
+          audio_codec: String.t(),
+          preset: String.t(),
+          crf: integer(),
+          width: integer(),
+          height: integer()
+        ]
+
+  defmodule State do
+    @moduledoc false
+    defstruct [
+      :input_path,
+      :output_dir,
+      :ffmpeg_pid,
+      :ffmpeg_port,
+      :on_progress,
+      :on_complete,
+      :on_error,
+      :buffer,
+      :duration,
+      :started_at
+    ]
+
+    @type t :: %__MODULE__{
+            input_path: String.t(),
+            output_dir: String.t(),
+            ffmpeg_pid: pid() | nil,
+            ffmpeg_port: port() | nil,
+            on_progress: (map() -> any()) | nil,
+            on_complete: (-> any()) | nil,
+            on_error: (String.t() -> any()) | nil,
+            buffer: String.t(),
+            duration: float() | nil,
+            started_at: DateTime.t()
+          }
+  end
+
+  ## Client API
+
+  @doc """
+  Starts a new FFmpeg transcoding process.
+
+  ## Options
+
+    * `:input_path` - (required) Path to the input video file
+    * `:output_dir` - (required) Directory where HLS segments and playlists will be written
+    * `:media_file` - (optional) MediaFile struct for intelligent codec detection
+    * `:on_progress` - (optional) Callback function called with progress updates
+    * `:on_complete` - (optional) Callback function called when transcoding completes
+    * `:on_error` - (optional) Callback function called when an error occurs
+    * `:video_codec` - (optional) Video codec (default: auto-detect from media_file or "libx264")
+    * `:audio_codec` - (optional) Audio codec (default: auto-detect from media_file or "aac")
+    * `:preset` - (optional) FFmpeg preset (default: "medium")
+    * `:crf` - (optional) Constant Rate Factor for quality (default: 23)
+    * `:width` - (optional) Output width (default: 1280)
+    * `:height` - (optional) Output height (default: 720)
+
+  ## Stream Copy Optimization
+
+  When a `media_file` is provided, the transcoder will intelligently decide whether to
+  copy or transcode each stream based on browser compatibility:
+
+    - H.264 video → copy (10-100x faster, zero quality loss)
+    - AAC audio → copy (10-100x faster, zero quality loss)
+    - Incompatible codecs → transcode to H.264/AAC
+
+  ## Examples
+
+      # With media_file for intelligent optimization
+      {:ok, pid} = FfmpegHlsTranscoder.start_transcoding(
+        input_path: "/path/to/video.mkv",
+        output_dir: "/tmp/hls",
+        media_file: media_file
+      )
+
+      # Manual codec control
+      {:ok, pid} = FfmpegHlsTranscoder.start_transcoding(
+        input_path: "/path/to/video.mkv",
+        output_dir: "/tmp/hls",
+        video_codec: "copy",
+        audio_codec: "aac"
+      )
+  """
+  @spec start_transcoding(transcode_opts()) :: GenServer.on_start()
+  def start_transcoding(opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
+  @doc """
+  Stops an active transcoding process.
+  """
+  @spec stop_transcoding(pid()) :: :ok
+  def stop_transcoding(pid) do
+    GenServer.stop(pid, :normal)
+  end
+
+  @doc """
+  Gets the current transcoding status.
+  """
+  @spec get_status(pid()) :: {:ok, map()} | {:error, term()}
+  def get_status(pid) do
+    GenServer.call(pid, :get_status)
+  end
+
+  ## Server Callbacks
+
+  @impl true
+  def init(opts) do
+    input_path = Keyword.fetch!(opts, :input_path)
+    output_dir = Keyword.fetch!(opts, :output_dir)
+
+    # Ensure output directory exists
+    File.mkdir_p!(output_dir)
+
+    # Extract callbacks
+    on_progress = Keyword.get(opts, :on_progress)
+    on_complete = Keyword.get(opts, :on_complete)
+    on_error = Keyword.get(opts, :on_error)
+
+    # Build FFmpeg command
+    args = build_ffmpeg_args(input_path, output_dir, opts)
+
+    Logger.info("Starting FFmpeg HLS transcoding: #{input_path}")
+    Logger.debug("FFmpeg args: #{inspect(args)}")
+
+    # Start FFmpeg process
+    case start_ffmpeg_process(args) do
+      {:ok, port, pid} ->
+        state = %State{
+          input_path: input_path,
+          output_dir: output_dir,
+          ffmpeg_pid: pid,
+          ffmpeg_port: port,
+          on_progress: on_progress,
+          on_complete: on_complete,
+          on_error: on_error,
+          buffer: "",
+          duration: nil,
+          started_at: DateTime.utc_now()
+        }
+
+        {:ok, state}
+
+      {:error, reason} ->
+        Logger.error("Failed to start FFmpeg process: #{inspect(reason)}")
+        {:stop, {:ffmpeg_start_failed, reason}}
+    end
+  end
+
+  @impl true
+  def handle_call(:get_status, _from, state) do
+    status = %{
+      input_path: state.input_path,
+      output_dir: state.output_dir,
+      ffmpeg_alive?: is_port(state.ffmpeg_port) and Port.info(state.ffmpeg_port) != nil,
+      duration: state.duration,
+      started_at: state.started_at
+    }
+
+    {:reply, {:ok, status}, state}
+  end
+
+  @impl true
+  def handle_info({port, {:data, data}}, %{ffmpeg_port: port} = state) when is_port(port) do
+    # Log raw FFmpeg output for debugging (helpful when diagnosing issues)
+    if String.trim(data) != "" do
+      Logger.debug("FFmpeg: #{String.trim(data)}")
+    end
+
+    # Accumulate output in buffer
+    buffer = state.buffer <> data
+
+    # Parse FFmpeg output for progress and duration
+    state =
+      buffer
+      |> parse_ffmpeg_output()
+      |> case do
+        {:duration, duration} ->
+          Logger.debug("Detected video duration: #{duration}s")
+          %{state | duration: duration, buffer: ""}
+
+        {:progress, progress_data} ->
+          if state.on_progress && state.duration do
+            percentage = progress_data.time / state.duration * 100
+            progress = Map.put(progress_data, :percentage, percentage)
+            state.on_progress.(progress)
+          end
+
+          %{state | buffer: ""}
+
+        {:error, error_msg} ->
+          Logger.error("FFmpeg error: #{error_msg}")
+
+          if state.on_error do
+            state.on_error.(error_msg)
+          end
+
+          %{state | buffer: ""}
+
+        :no_match ->
+          # Keep buffer for next iteration (but limit size)
+          buffer = if byte_size(buffer) > 10_000, do: "", else: buffer
+          %{state | buffer: buffer}
+      end
+
+    {:noreply, state}
+  end
+
+  def handle_info({port, {:exit_status, 0}}, %{ffmpeg_port: port} = state) do
+    Logger.info("FFmpeg transcoding completed successfully")
+
+    if state.on_complete do
+      state.on_complete.()
+    end
+
+    {:stop, :normal, state}
+  end
+
+  def handle_info({port, {:exit_status, status}}, %{ffmpeg_port: port} = state) do
+    # Include any buffered output in the error message
+    error_details =
+      if state.buffer != "" do
+        "\nFFmpeg output:\n#{state.buffer}"
+      else
+        ""
+      end
+
+    error_msg = "FFmpeg exited with status #{status}#{error_details}"
+    Logger.error(error_msg)
+
+    if state.on_error do
+      state.on_error.(error_msg)
+    end
+
+    {:stop, {:ffmpeg_failed, status}, state}
+  end
+
+  def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
+    Logger.warning("FFmpeg process terminated: #{inspect(reason)}")
+    {:stop, {:ffmpeg_terminated, reason}, state}
+  end
+
+  def handle_info(msg, state) do
+    Logger.debug("Unhandled message in FfmpegHlsTranscoder: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  @impl true
+  def terminate(reason, state) do
+    Logger.info("Terminating FFmpeg transcoder, reason: #{inspect(reason)}")
+
+    # Stop FFmpeg process if still running
+    if is_port(state.ffmpeg_port) && Port.info(state.ffmpeg_port) do
+      # Get OS PID before closing port
+      os_pid = state.ffmpeg_pid
+
+      # Close the port (sends SIGTERM to FFmpeg)
+      Port.close(state.ffmpeg_port)
+
+      # Give FFmpeg a moment to gracefully shutdown
+      Process.sleep(100)
+
+      # Verify the process has terminated, force kill if needed
+      if os_pid && process_alive?(os_pid) do
+        Logger.warning("FFmpeg process #{os_pid} did not terminate gracefully, sending SIGKILL")
+        System.cmd("kill", ["-9", to_string(os_pid)], stderr_to_stdout: true)
+      else
+        Logger.debug("FFmpeg process #{os_pid} terminated successfully")
+      end
+    end
+
+    :ok
+  end
+
+  ## Private Functions
+
+  # Check if an OS process is still alive
+  defp process_alive?(os_pid) do
+    case System.cmd("kill", ["-0", to_string(os_pid)], stderr_to_stdout: true) do
+      {_, 0} -> true
+      _ -> false
+    end
+  rescue
+    _ -> false
+  end
+
+  # Determines if a video codec is compatible with browsers and can be copied instead of re-encoded
+  defp should_copy_video?(nil), do: false
+
+  defp should_copy_video?(codec) when is_binary(codec) do
+    normalized = String.downcase(codec)
+
+    # H.264 (AVC) is universally supported by browsers
+    normalized in ["h264", "avc", "avc1"]
+  end
+
+  # Determines if an audio codec is compatible with browsers and can be copied instead of re-encoded
+  defp should_copy_audio?(nil), do: false
+
+  defp should_copy_audio?(codec) when is_binary(codec) do
+    normalized = String.downcase(codec)
+
+    # AAC is universally supported by browsers
+    normalized in ["aac", "mp4a"]
+  end
+
+  # Build FFmpeg command arguments for HLS transcoding
+  defp build_ffmpeg_args(input_path, output_dir, opts) do
+    media_file = Keyword.get(opts, :media_file)
+
+    # Get transcode policy from config
+    transcode_policy =
+      Application.get_env(:mydia, :streaming, [])
+      |> Keyword.get(:transcode_policy, :copy_when_compatible)
+
+    # Determine video codec - use copy if compatible and policy allows, otherwise transcode
+    video_codec =
+      case Keyword.get(opts, :video_codec) do
+        nil when not is_nil(media_file) and transcode_policy == :copy_when_compatible ->
+          if should_copy_video?(media_file.codec) do
+            Logger.info(
+              "Video codec #{media_file.codec} is compatible, using stream copy (fast, no quality loss)"
+            )
+
+            "copy"
+          else
+            Logger.info("Video codec #{media_file.codec || "unknown"} needs transcoding to H.264")
+
+            "libx264"
+          end
+
+        nil ->
+          if transcode_policy == :always do
+            Logger.debug("Transcode policy is :always, transcoding video to H.264")
+          end
+
+          "libx264"
+
+        codec ->
+          codec
+      end
+
+    # Determine audio codec - use copy if compatible and policy allows, otherwise transcode
+    audio_codec =
+      case Keyword.get(opts, :audio_codec) do
+        nil when not is_nil(media_file) and transcode_policy == :copy_when_compatible ->
+          if should_copy_audio?(media_file.audio_codec) do
+            Logger.info(
+              "Audio codec #{media_file.audio_codec} is compatible, using stream copy (fast, no quality loss)"
+            )
+
+            "copy"
+          else
+            Logger.info(
+              "Audio codec #{media_file.audio_codec || "unknown"} needs transcoding to AAC"
+            )
+
+            "aac"
+          end
+
+        nil ->
+          if transcode_policy == :always do
+            Logger.debug("Transcode policy is :always, transcoding audio to AAC")
+          end
+
+          "aac"
+
+        codec ->
+          codec
+      end
+
+    preset = Keyword.get(opts, :preset, "medium")
+    crf = Keyword.get(opts, :crf, 23)
+    width = Keyword.get(opts, :width, 1280)
+    height = Keyword.get(opts, :height, 720)
+
+    # Use index.m3u8 to match HLS controller expectations
+    playlist_path = Path.join(output_dir, "index.m3u8")
+    segment_pattern = Path.join(output_dir, "segment_%03d.ts")
+
+    # Build base args
+    base_args = [
+      "-i",
+      input_path
+    ]
+
+    # Build video encoding args
+    video_args =
+      if video_codec == "copy" do
+        # Stream copy - no encoding parameters needed
+        ["-c:v", "copy"]
+      else
+        # Full transcoding with encoding parameters
+        # Force 8-bit output (yuv420p) for maximum browser compatibility
+        # This handles 10-bit sources (common with AV1/HEVC) by converting to 8-bit
+        [
+          "-c:v",
+          video_codec,
+          "-preset",
+          preset,
+          "-crf",
+          to_string(crf),
+          "-pix_fmt",
+          "yuv420p",
+          "-profile:v",
+          "high",
+          "-s",
+          "#{width}x#{height}",
+          "-g",
+          "60",
+          "-bf",
+          "0"
+        ]
+      end
+
+    # Build audio encoding args
+    audio_args =
+      if audio_codec == "copy" do
+        # Stream copy - no encoding parameters needed
+        ["-c:a", "copy"]
+      else
+        # Full transcoding with encoding parameters
+        [
+          "-c:a",
+          audio_codec,
+          "-b:a",
+          "128k",
+          "-ar",
+          "48000",
+          "-ac",
+          "2"
+        ]
+      end
+
+    # HLS output parameters
+    hls_args = [
+      "-f",
+      "hls",
+      "-hls_time",
+      "6",
+      "-hls_playlist_type",
+      "event",
+      "-hls_segment_filename",
+      segment_pattern,
+      # Progress reporting
+      "-progress",
+      "pipe:1",
+      "-loglevel",
+      "info",
+      playlist_path
+    ]
+
+    # Combine all args
+    base_args ++ video_args ++ audio_args ++ hls_args
+  end
+
+  # Start FFmpeg process using Port
+  defp start_ffmpeg_process(args) do
+    try do
+      port =
+        Port.open(
+          {:spawn_executable, System.find_executable("ffmpeg")},
+          [
+            :binary,
+            :exit_status,
+            :stderr_to_stdout,
+            :hide,
+            args: args
+          ]
+        )
+
+      # Get the OS process ID
+      case Port.info(port, :os_pid) do
+        {:os_pid, os_pid} ->
+          {:ok, port, os_pid}
+
+        nil ->
+          {:error, :no_os_pid}
+      end
+    rescue
+      e ->
+        {:error, e}
+    end
+  end
+
+  # Parse FFmpeg output for duration, progress, and errors
+  defp parse_ffmpeg_output(output) do
+    cond do
+      # Duration: 00:01:23.45
+      output =~ ~r/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/ ->
+        [_, hours, minutes, seconds] =
+          Regex.run(~r/Duration: (\d{2}):(\d{2}):(\d{2}\.\d{2})/, output)
+
+        duration =
+          String.to_integer(hours) * 3600 + String.to_integer(minutes) * 60 +
+            String.to_float(seconds)
+
+        {:duration, duration}
+
+      # out_time_ms=12345678
+      output =~ ~r/out_time_ms=(\d+)/ ->
+        [_, time_ms] = Regex.run(~r/out_time_ms=(\d+)/, output)
+        time_seconds = String.to_integer(time_ms) / 1_000_000
+
+        progress = %{
+          time: time_seconds
+        }
+
+        {:progress, progress}
+
+      # Error detection
+      output =~ ~r/Error|Invalid|failed/i ->
+        {:error, String.trim(output)}
+
+      true ->
+        :no_match
+    end
+  end
+end

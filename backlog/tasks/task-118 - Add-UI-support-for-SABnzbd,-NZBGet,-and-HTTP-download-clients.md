@@ -5,7 +5,7 @@ status: Done
 assignee:
   - Claude
 created_date: '2025-11-08 04:17'
-updated_date: '2025-11-08 04:36'
+updated_date: '2025-11-08 04:39'
 labels:
   - ui
   - usenet
@@ -273,4 +273,29 @@ defp get_adapter(:http), do: Mydia.Downloads.Client.HTTP
 ## Final Status: ALL BUGS FIXED! ✅
 
 The health check now works correctly for all 5 client types. NZBGet should now show as healthy (or provide a meaningful error if the service isn't reachable).
+
+## Release v0.3.1 Created ✅
+
+**Commit**: 8ccc7dc
+**Tag**: v0.3.1
+**GitHub Release**: https://github.com/getmydia/mydia/releases/tag/v0.3.1
+
+### Files Modified:
+1. `lib/mydia_web/live/admin_config_live/index.html.heex` - UI form fields
+2. `lib/mydia/config/schema.ex` - Type validation (2 locations)
+3. `lib/mydia/config/loader.ex` - Error formatter fix
+4. `lib/mydia/downloads/untracked_matcher.ex` - Torrent client filtering
+5. `lib/mydia/downloads.ex` - HTTP adapter registration
+6. `lib/mydia/downloads/client_health.ex` - Adapter mappings and api_key
+7. `mix.exs` - Version bump to 0.3.1
+
+Plus additional files with formatting improvements and test updates.
+
+### Total Changes:
+- 15 files changed
+- 437 insertions(+)
+- 55 deletions(-)
+
+### Release Summary:
+Bugfix release addressing 7 critical issues discovered during implementation. All download client types now fully supported in the UI with proper validation and health checking.
 <!-- SECTION:NOTES:END -->

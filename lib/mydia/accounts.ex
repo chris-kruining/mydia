@@ -144,6 +144,15 @@ defmodule Mydia.Accounts do
   end
 
   @doc """
+  Updates a user's password.
+  """
+  def update_password(%User{} = user, password) do
+    user
+    |> User.password_changeset(%{password: password})
+    |> Repo.update()
+  end
+
+  @doc """
   Deletes a user.
   """
   def delete_user(%User{} = user) do

@@ -28,12 +28,19 @@ A modern, self-hosted media management platform for tracking, organizing, and mo
 - 📊 **Missing Episodes** – Identify gaps in your library
 - ⏱️ **Background Jobs** – Automated scanning, searching, and importing with Oban
 
+### User Management & Access Control
+- 👥 **Role-Based Access** – Admin and guest user roles with appropriate permissions
+- 🎫 **Guest Request System** – Guests can browse media and submit requests for new content
+- ✅ **Request Approval Workflow** – Admins review and approve/reject guest requests with notes
+- 📊 **Request Tracking** – Users can monitor the status of their media requests
+- 🔐 **Multi-Auth Support** – Local authentication and OIDC/OpenID Connect integration
+- 🚀 **Auto-Promotion** – First OIDC user automatically promoted to admin role
+
 ### System & Configuration
 - ⚙️ **Admin Dashboard** – System status, configuration management, and health monitoring
 - 🔧 **Flexible Configuration** – Environment variables, YAML files, or database settings with clear precedence
 - 🎨 **Modern UI** – Built with Phoenix LiveView, Tailwind CSS, and DaisyUI
 - 🐳 **Docker Ready** – Pre-built images for amd64 and arm64 platforms
-- 🔐 **Local Authentication** – Built-in user management (OIDC support coming soon)
 
 ## 📸 Screenshots
 
@@ -307,6 +314,13 @@ See [DEPLOYMENT.md](docs/deployment/DEPLOYMENT.md) for advanced deployment topic
 | `OIDC_CLIENT_SECRET` | OIDC client secret | - |
 | `OIDC_REDIRECT_URI` | OIDC callback URL | Auto-computed |
 | `OIDC_SCOPES` | Space-separated scope list | `openid profile email` |
+
+**User Roles:**
+
+- **Admin**: Full access to all features including media management, downloads, configuration, and request approval
+- **Guest**: Can browse media library and submit requests for new content that require admin approval
+
+**OIDC Auto-Promotion**: The first user to log in via OIDC is automatically promoted to admin role. Subsequent OIDC users are assigned the guest role by default.
 
 **Admin User Creation:**
 

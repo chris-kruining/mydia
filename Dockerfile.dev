@@ -1,4 +1,4 @@
-FROM elixir:1.19
+FROM elixir:1.18
 
 # Install build dependencies and Node.js
 RUN apt-get update -qq && \

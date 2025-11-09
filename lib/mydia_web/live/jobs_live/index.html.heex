@@ -1,4 +1,9 @@
-<Layouts.app flash={@flash}>
+<Layouts.app
+  flash={@flash}
+  movie_count={@movie_count}
+  tv_show_count={@tv_show_count}
+  downloads_count={@downloads_count}
+>
   <div class="container mx-auto px-4 py-8">
     <%!-- Header --%>
     <div class="flex justify-between items-center mb-8">
@@ -68,7 +73,7 @@
                       {job.stats.completed_count} / {job.stats.total_executions} runs
                     </div>
                     <div class="text-xs text-gray-500">
-                      Avg: {format_duration_ms(job.stats.avg_duration_ms)}
+                      Avg: {format_job_duration_ms(job.stats.avg_duration_ms)}
                     </div>
                   </div>
                 </td>
@@ -186,7 +191,7 @@
                       <span class="text-gray-400">-</span>
                     <% end %>
                   </td>
-                  <td>{format_duration(job.attempted_at, job.completed_at)}</td>
+                  <td>{format_job_duration(job.attempted_at, job.completed_at)}</td>
                   <td>
                     <span class={["badge badge-sm", state_badge_class(job.state)]}>
                       {job.state}
@@ -267,7 +272,9 @@
             </div>
             <div>
               <div class="text-sm font-semibold text-gray-500">Duration</div>
-              <div>{format_duration(@selected_job.attempted_at, @selected_job.completed_at)}</div>
+              <div>
+                {format_job_duration(@selected_job.attempted_at, @selected_job.completed_at)}
+              </div>
             </div>
           </div>
 

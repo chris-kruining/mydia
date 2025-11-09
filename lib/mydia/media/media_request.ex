@@ -1,0 +1,103 @@
+defmodule Mydia.Media.MediaRequest do
+  @moduledoc """
+  Schema for media requests submitted by guest users requiring admin approval.
+  """
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+
+  @status_values ~w(pending approved rejected)
+  @media_types ~w(movie tv_show)
+
+  schema "media_requests" do
+    field :media_type, :string
+    field :title, :string
+    field :original_title, :string
+    field :year, :integer
+    field :tmdb_id, :integer
+    field :imdb_id, :string
+    field :status, :string, default: "pending"
+    field :requester_notes, :string
+    field :admin_notes, :string
+    field :rejection_reason, :string
+    field :approved_at, :utc_datetime
+    field :rejected_at, :utc_datetime
+
+    belongs_to :requester, Mydia.Accounts.User
+    belongs_to :approved_by, Mydia.Accounts.User
+    belongs_to :media_item, Mydia.Media.MediaItem
+
+    timestamps(type: :utc_datetime)
+  end
+
+  @doc """
+  Changeset for creating a new media request.
+  """
+  def create_changeset(media_request, attrs) do
+    media_request
+    |> cast(attrs, [
+      :media_type,
+      :title,
+      :original_title,
+      :year,
+      :tmdb_id,
+      :imdb_id,
+      :requester_notes,
+      :requester_id
+    ])
+    |> validate_required([:media_type, :title, :requester_id])
+    |> validate_inclusion(:media_type, @media_types)
+    |> validate_inclusion(:status, @status_values)
+    |> validate_at_least_one_external_id()
+    |> foreign_key_constraint(:requester_id)
+  end
+
+  @doc """
+  Changeset for approving a media request.
+  """
+  def approve_changeset(media_request, attrs) do
+    media_request
+    |> cast(attrs, [:admin_notes, :approved_by_id, :media_item_id])
+    |> validate_required([:approved_by_id])
+    |> put_change(:status, "approved")
+    |> put_change(:approved_at, DateTime.utc_now() |> DateTime.truncate(:second))
+    |> foreign_key_constraint(:approved_by_id)
+    |> foreign_key_constraint(:media_item_id)
+  end
+
+  @doc """
+  Changeset for rejecting a media request.
+  """
+  def reject_changeset(media_request, attrs) do
+    media_request
+    |> cast(attrs, [:rejection_reason, :admin_notes, :approved_by_id])
+    |> validate_required([:rejection_reason, :approved_by_id])
+    |> put_change(:status, "rejected")
+    |> put_change(:rejected_at, DateTime.utc_now() |> DateTime.truncate(:second))
+    |> foreign_key_constraint(:approved_by_id)
+  end
+
+  @doc """
+  Returns the list of valid status values.
+  """
+  def valid_statuses, do: @status_values
+
+  @doc """
+  Returns the list of valid media types.
+  """
+  def valid_media_types, do: @media_types
+
+  # Ensure at least one external ID (TMDB or IMDB) is provided
+  defp validate_at_least_one_external_id(changeset) do
+    tmdb_id = get_field(changeset, :tmdb_id)
+    imdb_id = get_field(changeset, :imdb_id)
+
+    if is_nil(tmdb_id) && is_nil(imdb_id) do
+      add_error(changeset, :tmdb_id, "either TMDB ID or IMDB ID must be provided")
+    else
+      changeset
+    end
+  end
+end

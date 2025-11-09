@@ -412,10 +412,11 @@ defmodule MydiaWeb.CoreComponents do
   """
   attr :name, :string, required: true
   attr :class, :string, default: "size-4"
+  attr :rest, :global
 
   def icon(%{name: "hero-" <> _} = assigns) do
     ~H"""
-    <span class={[@name, @class]} />
+    <span {@rest} class={[@name, @class]} />
     """
   end
 
@@ -500,6 +501,527 @@ defmodule MydiaWeb.CoreComponents do
     </dialog>
     """
   end
+
+  @doc """
+  Renders a video player component with playback progress tracking.
+
+  Supports both direct play (browser-compatible files) and HLS adaptive streaming.
+  Automatically saves and resumes playback position.
+
+  ## Examples
+
+      <.video_player content_type="movie" content_id={@media_item.id} />
+      <.video_player content_type="episode" content_id={@episode.id} />
+      <.video_player content_type="movie" content_id={@media_item.id} autoplay={true} />
+  """
+  attr :content_type, :string, required: true, doc: "Type of content: 'movie' or 'episode'"
+  attr :content_id, :string, required: true, doc: "ID of the media_item or episode"
+  attr :autoplay, :boolean, default: false, doc: "Whether to autoplay the video"
+  attr :controls, :boolean, default: true, doc: "Whether to show video controls"
+  attr :class, :string, default: "", doc: "Additional CSS classes for the container"
+  attr :next_episode, :map, default: nil, doc: "Next episode info map (for TV shows)"
+  attr :intro_start, :any, default: nil, doc: "Intro start timestamp in seconds"
+  attr :intro_end, :any, default: nil, doc: "Intro end timestamp in seconds"
+  attr :credits_start, :any, default: nil, doc: "Credits start timestamp in seconds"
+
+  def video_player(assigns) do
+    ~H"""
+    <div
+      x-data="videoPlayer()"
+      phx-hook="VideoPlayer"
+      id={"video-player-#{@content_type}-#{@content_id}"}
+      data-content-type={@content_type}
+      data-content-id={@content_id}
+      data-next-episode={if @next_episode, do: Jason.encode!(@next_episode), else: nil}
+      data-intro-start={@intro_start}
+      data-intro-end={@intro_end}
+      data-credits-start={@credits_start}
+      class={["relative bg-black rounded-lg overflow-hidden flex items-center justify-center", @class]}
+      x-bind:class="{ 'cursor-none': !controlsVisible }"
+    >
+      <video
+        x-ref="video"
+        id={"video-#{@content_type}-#{@content_id}"}
+        class="w-full h-auto max-h-[80vh] bg-black object-contain"
+        controls={false}
+        autoplay={@autoplay}
+        muted={@autoplay}
+        preload="metadata"
+        playsinline
+        @play="onPlay"
+        @pause="onPause"
+        @timeupdate="onTimeUpdate"
+        @loadedmetadata="onLoadedMetadata"
+        @durationchange="onDurationChange"
+        @volumechange="onVolumeChange"
+        @waiting="onWaiting"
+        @playing="onPlaying"
+        @ratechange="onRateChange"
+      >
+        Your browser does not support video playback.
+      </video>
+
+      <%!-- Custom video controls --%>
+      <div
+        class="controls absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/70 to-transparent backdrop-blur-sm p-4 transition-opacity duration-300 ease-in-out"
+        x-show="controlsVisible"
+        x-transition
+        x-bind:class="{ 'pointer-events-none opacity-0': !controlsVisible }"
+      >
+        <%!-- Progress bar with hover effect --%>
+        <div class="progress-container mb-3 group cursor-pointer">
+          <input
+            type="range"
+            min="0"
+            max="100"
+            x-bind:value="progressPercent"
+            @input="setProgress($event.target.value)"
+            step="0.1"
+            class="progress-bar range range-xs range-primary w-full transition-all duration-200 hover:range-sm"
+          />
+        </div>
+
+        <%!-- Control buttons row --%>
+        <div class="flex items-center gap-2 md:gap-3">
+          <%!-- Play/Pause button - larger on mobile with smooth transitions --%>
+          <button
+            type="button"
+            @click="togglePlay"
+            class="play-pause-btn btn btn-ghost btn-sm md:btn-sm btn-circle text-white hover:bg-white/20 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 transition-all duration-200 active:scale-95 hover:scale-105 focus:ring-2 focus:ring-primary/50"
+            aria-label="Play/Pause"
+          >
+            <.icon
+              x-show="!playing"
+              name="hero-play"
+              class="w-5 h-5 md:w-5 md:h-5 transition-transform duration-200"
+            />
+            <.icon
+              x-show="playing"
+              x-cloak
+              name="hero-pause"
+              class="w-5 h-5 md:w-5 md:h-5 transition-transform duration-200"
+            />
+          </button>
+
+          <%!-- Time display - hidden on very small screens --%>
+          <div class="time-display text-white text-xs md:text-sm font-medium hidden sm:block">
+            <span x-text="formattedCurrentTime">0:00</span>
+            <span class="mx-1">/</span>
+            <span x-text="formattedDuration">0:00</span>
+          </div>
+
+          <div class="flex-1"></div>
+
+          <%!-- Volume controls - hidden on mobile, shown on tablet+ --%>
+          <div class="volume-controls hidden md:flex items-center gap-2">
+            <button
+              type="button"
+              @click="toggleMute"
+              class="mute-btn btn btn-ghost btn-sm btn-circle text-white hover:bg-white/20 transition-all duration-200 active:scale-95 hover:scale-105"
+              aria-label="Mute/Unmute"
+            >
+              <.icon
+                x-show="!muted"
+                name="hero-speaker-wave"
+                class="w-5 h-5 transition-transform duration-200"
+              />
+              <.icon
+                x-show="muted"
+                x-cloak
+                name="hero-speaker-x-mark"
+                class="w-5 h-5 transition-transform duration-200"
+              />
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              x-bind:value="volume"
+              @input="setVolume($event.target.value)"
+              class="volume-slider range range-xs range-primary w-20 transition-all duration-200"
+            />
+          </div>
+
+          <%!-- Settings button - larger on mobile with smooth transitions --%>
+          <div class="settings-container relative">
+            <button
+              type="button"
+              @click="toggleSettings"
+              class="settings-btn btn btn-ghost btn-sm btn-circle text-white hover:bg-white/20 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 transition-all duration-200 active:scale-95 hover:scale-105 focus:ring-2 focus:ring-primary/50"
+              aria-label="Settings"
+            >
+              <.icon
+                name="hero-cog-6-tooth"
+                class="w-5 h-5 transition-transform duration-200 hover:rotate-90"
+              />
+            </button>
+
+            <%!-- Settings menu --%>
+            <div
+              x-show="settingsOpen"
+              x-transition
+              style="display: none"
+              @click.outside="closeSettings"
+              class="absolute bottom-full right-0 mb-2 bg-base-100 rounded-lg shadow-2xl min-w-[200px] overflow-hidden border border-base-300"
+            >
+              <%!-- Playback Speed submenu --%>
+              <div class="speed-menu-container">
+                <button
+                  type="button"
+                  @click="toggleSpeedMenu"
+                  class="speed-menu-btn w-full px-4 py-2 text-left hover:bg-base-200 flex items-center justify-between text-base-content transition-colors"
+                >
+                  <span class="text-sm">Speed</span>
+                  <div class="flex items-center gap-2">
+                    <span x-text="speedDisplay" class="text-sm text-base-content/70">Normal</span>
+                    <.icon name="hero-chevron-right" class="w-4 h-4 text-base-content/50" />
+                  </div>
+                </button>
+
+                <%!-- Speed options submenu --%>
+                <div
+                  x-show="speedMenuOpen"
+                  x-transition
+                  style="display: none"
+                  class="absolute bottom-0 right-full mr-1 bg-base-100 rounded-lg shadow-2xl min-w-[140px] overflow-hidden border border-base-300"
+                >
+                  <button
+                    :for={speed <- [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]}
+                    type="button"
+                    @click={"setSpeed(#{speed})"}
+                    class="speed-option w-full px-4 py-2 text-left hover:bg-base-200 flex items-center justify-between text-base-content transition-colors text-sm"
+                  >
+                    <span>{if speed == 1.0, do: "Normal", else: "#{speed}x"}</span>
+                    <.icon
+                      x-show={"Math.abs(playbackRate - #{speed}) < 0.01"}
+                      name="hero-check"
+                      class="w-4 h-4 text-primary"
+                    />
+                  </button>
+                </div>
+              </div>
+
+              <%!-- Quality submenu (shown when HLS is active) --%>
+              <div
+                x-show="hlsLevels.length > 0"
+                class="quality-menu-container border-t border-base-300"
+              >
+                <button
+                  type="button"
+                  @click="toggleQualityMenu"
+                  class="quality-menu-btn w-full px-4 py-2 text-left hover:bg-base-200 flex items-center justify-between text-base-content transition-colors"
+                >
+                  <span class="text-sm">Quality</span>
+                  <div class="flex items-center gap-2">
+                    <span x-text="qualityDisplay" class="text-sm text-base-content/70">Auto</span>
+                    <.icon name="hero-chevron-right" class="w-4 h-4 text-base-content/50" />
+                  </div>
+                </button>
+
+                <%!-- Quality options submenu --%>
+                <div
+                  x-show="qualityMenuOpen"
+                  x-transition
+                  style="display: none"
+                  class="absolute bottom-0 right-full mr-1 bg-base-100 rounded-lg shadow-2xl min-w-[140px] overflow-hidden border border-base-300"
+                >
+                  <button
+                    type="button"
+                    @click="setQuality(-1)"
+                    class="w-full px-4 py-2 text-left hover:bg-base-200 flex items-center justify-between text-base-content transition-colors text-sm"
+                  >
+                    <span>Auto</span>
+                    <.icon
+                      x-show="currentHlsLevel === -1"
+                      name="hero-check"
+                      class="w-4 h-4 text-primary"
+                    />
+                  </button>
+                  <template x-for="(level, index) in hlsLevels">
+                    <button
+                      type="button"
+                      @click="setQuality(index)"
+                      class="w-full px-4 py-2 text-left hover:bg-base-200 flex items-center justify-between text-base-content transition-colors text-sm"
+                    >
+                      <span x-text="level.height + 'p'"></span>
+                      <.icon
+                        x-show="currentHlsLevel === index"
+                        name="hero-check"
+                        class="w-4 h-4 text-primary"
+                      />
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <%!-- Fullscreen button - larger on mobile with smooth transitions --%>
+          <button
+            type="button"
+            @click="toggleFullscreen"
+            class="fullscreen-btn btn btn-ghost btn-sm btn-circle text-white hover:bg-white/20 min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 transition-all duration-200 active:scale-95 hover:scale-105 focus:ring-2 focus:ring-primary/50"
+            aria-label="Toggle Fullscreen"
+          >
+            <.icon
+              x-show="!document.fullscreenElement"
+              name="hero-arrows-pointing-out"
+              class="w-5 h-5 transition-transform duration-200"
+            />
+            <.icon
+              x-show="document.fullscreenElement"
+              x-cloak
+              name="hero-arrows-pointing-in"
+              class="w-5 h-5 transition-transform duration-200"
+            />
+          </button>
+        </div>
+      </div>
+
+      <%!-- Loading indicator with smooth pulsing animation --%>
+      <div
+        x-show="loading"
+        x-transition
+        style="display: none"
+        class="absolute inset-0 flex items-center justify-center bg-black/90 pointer-events-none z-10"
+      >
+        <div class="flex flex-col items-center gap-4 animate-pulse">
+          <span class="loading loading-spinner loading-lg text-primary"></span>
+          <p class="text-white font-medium">Loading video...</p>
+        </div>
+      </div>
+
+      <%!-- Error message --%>
+      <div
+        x-show="error"
+        x-transition
+        style="display: none"
+        class="absolute inset-0 flex items-center justify-center bg-black/90 z-10"
+      >
+        <div class="flex flex-col items-center gap-4 text-center px-4">
+          <.icon name="hero-exclamation-circle" class="w-16 h-16 text-error" />
+          <p x-text="error" class="text-error font-medium text-lg">
+            Error loading video. Please try again.
+          </p>
+          <button
+            type="button"
+            class="btn btn-primary btn-sm"
+            onclick="window.location.reload()"
+          >
+            <.icon name="hero-arrow-path" class="w-4 h-4" /> Retry
+          </button>
+        </div>
+      </div>
+
+      <%!-- Skip Intro button (only shown during intro sequence for episodes) --%>
+      <div
+        x-show="skipIntroVisible"
+        x-transition
+        style="display: none"
+        class="absolute top-20 right-6 z-20"
+      >
+        <button
+          type="button"
+          @click="skipIntro"
+          class="btn btn-sm btn-ghost bg-base-100/90 hover:bg-base-100 text-base-content border border-base-300 shadow-lg backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+        >
+          <.icon name="hero-forward" class="w-4 h-4" /> Skip Intro
+        </button>
+      </div>
+
+      <%!-- Skip Credits button (only shown during credits for episodes) --%>
+      <div
+        x-show="skipCreditsVisible"
+        x-transition
+        style="display: none"
+        class="absolute top-20 right-6 z-20"
+      >
+        <button
+          type="button"
+          @click="skipCredits"
+          class="btn btn-sm btn-ghost bg-base-100/90 hover:bg-base-100 text-base-content border border-base-300 shadow-lg backdrop-blur-sm transition-all duration-200 hover:scale-105 active:scale-95"
+        >
+          <.icon name="hero-forward" class="w-4 h-4" /> Skip Credits
+        </button>
+      </div>
+
+      <%!-- Next Episode button and countdown (only shown for episodes with next episode) --%>
+      <div
+        x-show="nextEpisodeVisible"
+        x-transition
+        style="display: none"
+        class="absolute bottom-20 right-6 z-20"
+      >
+        <div class="bg-base-100/95 rounded-lg shadow-2xl overflow-hidden border border-base-300 max-w-sm backdrop-blur-sm">
+          <%!-- Next episode info --%>
+          <div class="next-episode-info p-4 flex gap-3">
+            <div class="next-episode-poster flex-shrink-0 w-24 h-36 bg-base-300 rounded overflow-hidden">
+              <%!-- Poster will be set via JavaScript --%>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-xs text-base-content/60 font-medium uppercase tracking-wide mb-1">
+                Next Episode
+              </p>
+              <h3 class="next-episode-title text-sm font-semibold text-base-content mb-1 line-clamp-2">
+                <%!-- Title will be set via JavaScript --%>
+              </h3>
+              <p class="next-episode-number text-xs text-base-content/70">
+                <%!-- Episode number will be set via JavaScript --%>
+              </p>
+            </div>
+          </div>
+
+          <%!-- Action buttons --%>
+          <div class="p-4 pt-0 flex gap-2">
+            <button
+              type="button"
+              @click="playNextEpisode"
+              class="next-episode-play-btn btn btn-primary btn-sm flex-1 transition-all duration-200 hover:scale-105 active:scale-95"
+            >
+              <.icon name="hero-play" class="w-4 h-4" /> Play Now
+            </button>
+            <button
+              type="button"
+              @click="cancelNextEpisode"
+              class="next-episode-cancel-btn btn btn-ghost btn-sm transition-all duration-200"
+            >
+              Cancel
+            </button>
+          </div>
+
+          <%!-- Auto-play countdown --%>
+          <div
+            x-show="countdownVisible"
+            x-transition
+            style="display: none"
+          >
+            <div class="px-4 pb-3">
+              <div class="flex items-center justify-between text-xs text-base-content/70 mb-2">
+                <span>Auto-playing in</span>
+                <span
+                  x-text="countdownSeconds + 's'"
+                  class="countdown-time font-semibold text-primary"
+                >
+                  15s
+                </span>
+              </div>
+              <div class="countdown-progress-bar w-full h-1 bg-base-300 rounded-full overflow-hidden">
+                <div
+                  x-bind:style="`width: ${countdownProgress}%`"
+                  class="countdown-progress h-full bg-primary transition-all duration-100 ease-linear"
+                >
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders a progress bar overlay for media cards.
+
+  Shows completion percentage for partially watched content.
+
+  ## Examples
+
+      <.progress_bar progress={@progress} />
+  """
+  attr :progress, :map, required: true, doc: "The progress struct"
+  attr :class, :string, default: "", doc: "Additional CSS classes"
+
+  def progress_bar(assigns) do
+    ~H"""
+    <div
+      :if={@progress && @progress.completion_percentage > 0 && @progress.completion_percentage < 90}
+      class={["absolute bottom-0 left-0 right-0 h-1 bg-base-300 z-10", @class]}
+    >
+      <div
+        class="h-full bg-primary transition-all duration-300"
+        style={"width: #{min(@progress.completion_percentage, 100)}%"}
+      >
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders a progress badge for media cards.
+
+  Shows "Continue Watching" for in-progress content or "Watched" for completed content.
+
+  ## Examples
+
+      <.progress_badge progress={@progress} />
+  """
+  attr :progress, :map, required: true, doc: "The progress struct"
+  attr :class, :string, default: "", doc: "Additional CSS classes"
+
+  def progress_badge(assigns) do
+    ~H"""
+    <div :if={@progress} class={["absolute top-2 right-2 z-10", @class]}>
+      <span
+        :if={@progress.completion_percentage > 0 && !@progress.watched}
+        class="badge badge-primary badge-sm shadow-md"
+      >
+        Continue
+      </span>
+
+      <span :if={@progress.watched} class="badge badge-success badge-sm shadow-md gap-1">
+        <.icon name="hero-check" class="w-3 h-3" /> Watched
+      </span>
+    </div>
+    """
+  end
+
+  @doc """
+  Formats time remaining from progress data.
+
+  Returns a human-readable string like "1h 23m left" or "5m left".
+  """
+  def format_time_remaining(%{position_seconds: position, duration_seconds: duration})
+      when is_integer(position) and is_integer(duration) do
+    remaining_seconds = max(duration - position, 0)
+    format_duration(remaining_seconds, suffix: " left")
+  end
+
+  def format_time_remaining(_), do: nil
+
+  @doc """
+  Formats duration in seconds to human-readable format.
+
+  ## Options
+
+    * `:suffix` - Optional suffix to append (default: "")
+
+  ## Examples
+
+      iex> format_duration(3665)
+      "1h 1m"
+
+      iex> format_duration(125)
+      "2m"
+
+      iex> format_duration(45, suffix: " left")
+      "45s left"
+  """
+  def format_duration(seconds, opts \\ []) when is_integer(seconds) do
+    suffix = Keyword.get(opts, :suffix, "")
+    hours = div(seconds, 3600)
+    minutes = div(rem(seconds, 3600), 60)
+    secs = rem(seconds, 60)
+
+    cond do
+      hours > 0 && minutes > 0 -> "#{hours}h #{minutes}m#{suffix}"
+      hours > 0 -> "#{hours}h#{suffix}"
+      minutes > 0 -> "#{minutes}m#{suffix}"
+      true -> "#{secs}s#{suffix}"
+    end
+  end
+
+  def format_duration(_, _), do: nil
 
   @doc """
   Translates an error message using gettext.

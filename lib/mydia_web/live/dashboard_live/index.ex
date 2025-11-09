@@ -2,6 +2,8 @@ defmodule MydiaWeb.DashboardLive.Index do
   use MydiaWeb, :live_view
   alias Mydia.Media
   alias Mydia.Metadata
+  alias Mydia.MediaRequests
+  alias Mydia.Accounts.Authorization
 
   @impl true
   def mount(_params, _session, socket) do
@@ -29,6 +31,7 @@ defmodule MydiaWeb.DashboardLive.Index do
         |> assign(:upcoming_episodes, [])
         |> assign(:library_status_map, %{})
         |> assign(:adding_item_id, nil)
+        |> assign(:pending_requests_count, 0)
       end
 
     {:ok, socket}
@@ -57,6 +60,14 @@ defmodule MydiaWeb.DashboardLive.Index do
     recent_episodes = Media.list_episodes_by_air_date(seven_days_ago, today, monitored: true)
     upcoming_episodes = Media.list_episodes_by_air_date(today, seven_days_ahead, monitored: true)
 
+    # Load pending requests count for admins
+    pending_requests_count =
+      if Authorization.can_manage_requests?(socket.assigns.current_user) do
+        MediaRequests.count_pending_requests()
+      else
+        0
+      end
+
     # Load trending data asynchronously
     send(self(), :load_trending_movies)
     send(self(), :load_trending_tv)
@@ -67,6 +78,7 @@ defmodule MydiaWeb.DashboardLive.Index do
     |> assign(:library_status_map, library_status_map)
     |> assign(:recent_episodes, Enum.take(recent_episodes, 10))
     |> assign(:upcoming_episodes, Enum.take(upcoming_episodes, 10))
+    |> assign(:pending_requests_count, pending_requests_count)
   end
 
   @impl true

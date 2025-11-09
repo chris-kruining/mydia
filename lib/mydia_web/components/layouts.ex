@@ -20,7 +20,12 @@ defmodule MydiaWeb.Layouts do
 
   ## Examples
 
-      <Layouts.app flash={@flash}>
+      <Layouts.app
+        flash={@flash}
+        movie_count={@movie_count}
+        tv_show_count={@tv_show_count}
+        downloads_count={@downloads_count}
+      >
         <h1>Content</h1>
       </Layouts.app>
 
@@ -31,16 +36,15 @@ defmodule MydiaWeb.Layouts do
     default: nil,
     doc: "the current [scope](https://hexdocs.pm/phoenix/scopes.html)"
 
+  attr :movie_count, :integer, default: 0, doc: "number of movies in library"
+  attr :tv_show_count, :integer, default: 0, doc: "number of TV shows in library"
+  attr :downloads_count, :integer, default: 0, doc: "number of active downloads"
+
   slot :inner_block, required: true
 
   def app(assigns) do
-    # Fetch counts if not provided
-    assigns =
-      assigns
-      |> Map.put_new(:movie_count, Mydia.Media.count_movies())
-      |> Map.put_new(:tv_show_count, Mydia.Media.count_tv_shows())
-      |> Map.put_new(:downloads_count, Mydia.Downloads.count_active_downloads())
-
+    # Navigation counts are loaded by the :load_navigation_data on_mount hook
+    # in the LiveView session (see router.ex and user_auth.ex) and passed as attributes
     ~H"""
     <div class="drawer lg:drawer-open">
       <input id="main-drawer" type="checkbox" class="drawer-toggle" />
@@ -137,6 +141,11 @@ defmodule MydiaWeb.Layouts do
               <li>
                 <a href="/admin">
                   <.icon name="hero-server" class="w-5 h-5" /> System Status
+                </a>
+              </li>
+              <li>
+                <a href="/admin/users">
+                  <.icon name="hero-users" class="w-5 h-5" /> Users
                 </a>
               </li>
               <li>

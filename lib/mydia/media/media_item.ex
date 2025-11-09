@@ -24,6 +24,8 @@ defmodule Mydia.Media.MediaItem do
     has_many :episodes, Mydia.Media.Episode
     has_many :media_files, Mydia.Library.MediaFile
     has_many :downloads, Mydia.Downloads.Download
+    has_many :media_requests, Mydia.Media.MediaRequest
+    has_many :playback_progress, Mydia.Playback.Progress
 
     timestamps(type: :utc_datetime)
   end

@@ -8,21 +8,24 @@ defmodule Mydia.Accounts.User do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @role_values ~w(admin user readonly)
+  @role_values ~w(admin user readonly guest)
 
   schema "users" do
     field :username, :string
     field :email, :string
     field :password_hash, :string
     field :password, :string, virtual: true
+    field :password_confirmation, :string, virtual: true
     field :oidc_sub, :string
     field :oidc_issuer, :string
-    field :role, :string, default: "user"
+    field :role, :string, default: "guest"
     field :display_name, :string
     field :avatar_url, :string
     field :last_login_at, :utc_datetime
 
     has_many :api_keys, Mydia.Accounts.ApiKey
+    has_many :media_requests, Mydia.Media.MediaRequest, foreign_key: :requester_id
+    has_many :approved_requests, Mydia.Media.MediaRequest, foreign_key: :approved_by_id
 
     timestamps(type: :utc_datetime)
   end
@@ -32,13 +35,22 @@ defmodule Mydia.Accounts.User do
   """
   def changeset(user, attrs) do
     user
-    |> cast(attrs, [:username, :email, :password, :role, :display_name, :avatar_url])
+    |> cast(attrs, [
+      :username,
+      :email,
+      :password,
+      :password_confirmation,
+      :role,
+      :display_name,
+      :avatar_url
+    ])
     |> validate_required([:username, :email, :role])
     |> validate_format(:email, ~r/^[^\s]+@[^\s]+$/, message: "must be a valid email")
     |> validate_length(:username, min: 3, max: 50)
     |> validate_inclusion(:role, @role_values)
     |> unique_constraint(:username)
     |> unique_constraint(:email)
+    |> validate_password()
     |> hash_password()
   end
 
@@ -63,9 +75,27 @@ defmodule Mydia.Accounts.User do
   end
 
   @doc """
+  Changeset for updating a user's password.
+  """
+  def password_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:password, :password_confirmation])
+    |> validate_required([:password])
+    |> validate_password()
+    |> hash_password()
+  end
+
+  @doc """
   Returns the list of valid role values.
   """
   def valid_roles, do: @role_values
+
+  # Validate password requirements
+  defp validate_password(changeset) do
+    changeset
+    |> validate_length(:password, min: 8, message: "must be at least 8 characters")
+    |> validate_confirmation(:password, message: "does not match password")
+  end
 
   # Hash the password if it's present
   defp hash_password(changeset) do

@@ -202,16 +202,16 @@ defmodule MydiaWeb.JobsLive.Index do
     Timex.format!(dt, "{ISO:Extended}")
   end
 
-  defp format_duration(nil, nil), do: "N/A"
-  defp format_duration(nil, _), do: "N/A"
-  defp format_duration(_, nil), do: "N/A"
+  defp format_job_duration(nil, nil), do: "N/A"
+  defp format_job_duration(nil, _), do: "N/A"
+  defp format_job_duration(_, nil), do: "N/A"
 
-  defp format_duration(%DateTime{} = attempted_at, %DateTime{} = completed_at) do
+  defp format_job_duration(%DateTime{} = attempted_at, %DateTime{} = completed_at) do
     duration = DateTime.diff(completed_at, attempted_at, :millisecond)
-    format_duration_ms(duration)
+    format_job_duration_ms(duration)
   end
 
-  defp format_duration_ms(ms) when is_integer(ms) do
+  defp format_job_duration_ms(ms) when is_integer(ms) do
     cond do
       ms >= 60_000 -> "#{Float.round(ms / 60_000, 1)}m"
       ms >= 1_000 -> "#{Float.round(ms / 1_000, 1)}s"
@@ -219,7 +219,7 @@ defmodule MydiaWeb.JobsLive.Index do
     end
   end
 
-  defp format_duration_ms(_), do: "N/A"
+  defp format_job_duration_ms(_), do: "N/A"
 
   defp state_badge_class(state) do
     case state do

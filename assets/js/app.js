@@ -24,6 +24,10 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/mydia"
 import topbar from "../vendor/topbar"
+import VideoPlayer from "./hooks/video_player"
+// Alpine.js for reactive UI components
+import Alpine from 'alpinejs'
+import { videoPlayer } from './alpine_components/video_player'
 
 // Theme toggle hook
 const ThemeToggle = {
@@ -67,11 +71,20 @@ const ThemeToggle = {
   }
 }
 
+// Initialize Alpine.js FIRST (before LiveView)
+window.Alpine = Alpine
+
+// Register Alpine components
+Alpine.data('videoPlayer', videoPlayer)
+
+// Start Alpine before LiveView connects (critical for x-cloak and x-show to work)
+Alpine.start()
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, ThemeToggle},
+  hooks: {...colocatedHooks, ThemeToggle, VideoPlayer},
 })
 
 // Show progress bar on live navigation and form submits

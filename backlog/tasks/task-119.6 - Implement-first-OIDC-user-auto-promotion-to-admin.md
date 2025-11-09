@@ -55,11 +55,11 @@ Add logic in `Accounts.upsert_user_from_oidc/3` to:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Added admin_exists?/0 helper function to check for existing admin users
-- [ ] #2 Modified upsert_user_from_oidc/3 to auto-promote first user when no admin exists
-- [ ] #3 Auto-promotion only applies to NEW users (not existing users on subsequent logins)
-- [ ] #4 Existing users always get their role from OIDC claims on re-login
-- [ ] #5 Added logging when auto-promotion occurs for audit trail
-- [ ] #6 All tests pass including 10 comprehensive test cases
-- [ ] #7 Code is properly formatted and follows project conventions
+- [x] #1 Added admin_exists?/0 helper function to check for existing admin users
+- [x] #2 Modified upsert_user_from_oidc/3 to auto-promote first user when no admin exists
+- [x] #3 Auto-promotion only applies to NEW users (not existing users on subsequent logins)
+- [x] #4 Existing users always get their role from OIDC claims on re-login
+- [x] #5 Added logging when auto-promotion occurs for audit trail
+- [x] #6 All tests pass including 10 comprehensive test cases
+- [x] #7 Code is properly formatted and follows project conventions
 <!-- AC:END -->

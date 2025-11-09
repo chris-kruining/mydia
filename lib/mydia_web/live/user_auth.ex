@@ -18,11 +18,13 @@ defmodule MydiaWeb.Live.UserAuth do
   - `:ensure_authenticated` - Requires user to be logged in
   - `:maybe_authenticated` - Loads user if present, but doesn't require it
   - `{:ensure_role, role}` - Requires user to have a specific role
+  - `:load_navigation_data` - Loads counts for navigation sidebar/layout
 
   Usage in LiveView:
       on_mount {MydiaWeb.Live.UserAuth, :ensure_authenticated}
       on_mount {MydiaWeb.Live.UserAuth, :maybe_authenticated}
       on_mount {MydiaWeb.Live.UserAuth, {:ensure_role, :admin}}
+      on_mount {MydiaWeb.Live.UserAuth, :load_navigation_data}
   """
   def on_mount(mode, params, session, socket)
 
@@ -58,6 +60,18 @@ defmodule MydiaWeb.Live.UserAuth do
 
       {:halt, socket}
     end
+  end
+
+  def on_mount(:load_navigation_data, _params, _session, socket) do
+    # Load navigation counts once per LiveView mount
+    # These are used by the layout component for sidebar badges
+    socket =
+      socket
+      |> assign(:movie_count, Mydia.Media.count_movies())
+      |> assign(:tv_show_count, Mydia.Media.count_tv_shows())
+      |> assign(:downloads_count, Mydia.Downloads.count_active_downloads())
+
+    {:cont, socket}
   end
 
   # Mount the current user from the session
@@ -99,9 +113,10 @@ defmodule MydiaWeb.Live.UserAuth do
   # Check if user has the required role
   defp has_role?(user, required_role) do
     role_hierarchy = %{
-      "admin" => 3,
-      "user" => 2,
-      "readonly" => 1
+      "admin" => 4,
+      "user" => 3,
+      "readonly" => 2,
+      "guest" => 1
     }
 
     user_level = Map.get(role_hierarchy, user.role, 0)

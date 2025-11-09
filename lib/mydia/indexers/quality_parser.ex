@@ -41,57 +41,65 @@ defmodule Mydia.Indexers.QualityParser do
         }
 
   # Resolution patterns (ordered by priority for matching)
-  @resolutions [
-    {"2160p", ~r/2160p|4k/i},
-    {"1080p", ~r/1080p/i},
-    {"720p", ~r/720p/i},
-    {"576p", ~r/576p/i},
-    {"480p", ~r/480p/i},
-    {"360p", ~r/360p/i}
-  ]
+  defp resolutions do
+    [
+      {"2160p", ~r/2160p|4k/i},
+      {"1080p", ~r/1080p/i},
+      {"720p", ~r/720p/i},
+      {"576p", ~r/576p/i},
+      {"480p", ~r/480p/i},
+      {"360p", ~r/360p/i}
+    ]
+  end
 
   # Source patterns
-  @sources [
-    {"REMUX", ~r/remux/i},
-    {"BluRay", ~r/blu[\-\s]?ray|bluray|bdrip|brrip|bd(?:$|[\.\s])/i},
-    {"WEB-DL", ~r/web[\-\s]?dl|webdl/i},
-    {"WEBRip", ~r/web[\-\s]?rip|webrip/i},
-    {"HDTV", ~r/hdtv/i},
-    {"SDTV", ~r/sdtv/i},
-    {"DVDRip", ~r/dvd[\-\s]?rip|dvdrip/i},
-    {"DVD", ~r/dvd/i},
-    {"Telecine", ~r/telecine|tc/i},
-    {"Telesync", ~r/telesync|ts/i},
-    {"CAM", ~r/cam(?:rip)?/i},
-    {"Screener", ~r/screener|scr/i},
-    {"PDTV", ~r/pdtv/i}
-  ]
+  defp sources do
+    [
+      {"REMUX", ~r/remux/i},
+      {"BluRay", ~r/blu[\-\s]?ray|bluray|bdrip|brrip|bd(?:$|[\.\s])/i},
+      {"WEB-DL", ~r/web[\-\s]?dl|webdl/i},
+      {"WEBRip", ~r/web[\-\s]?rip|webrip/i},
+      {"HDTV", ~r/hdtv/i},
+      {"SDTV", ~r/sdtv/i},
+      {"DVDRip", ~r/dvd[\-\s]?rip|dvdrip/i},
+      {"DVD", ~r/dvd/i},
+      {"Telecine", ~r/telecine|tc/i},
+      {"Telesync", ~r/telesync|ts/i},
+      {"CAM", ~r/cam(?:rip)?/i},
+      {"Screener", ~r/screener|scr/i},
+      {"PDTV", ~r/pdtv/i}
+    ]
+  end
 
   # Codec patterns
-  @codecs [
-    {"x265", ~r/x\.?265|hevc/i},
-    {"x264", ~r/x\.?264/i},
-    {"H.265", ~r/h\.265|hevc/i},
-    {"H.264", ~r/h\.264|avc/i},
-    {"XviD", ~r/xvid/i},
-    {"DivX", ~r/divx/i},
-    {"VP9", ~r/vp9/i},
-    {"AV1", ~r/av1/i}
-  ]
+  defp codecs do
+    [
+      {"x265", ~r/x\.?265|hevc/i},
+      {"x264", ~r/x\.?264/i},
+      {"H.265", ~r/h\.265|hevc/i},
+      {"H.264", ~r/h\.264|avc/i},
+      {"XviD", ~r/xvid/i},
+      {"DivX", ~r/divx/i},
+      {"VP9", ~r/vp9/i},
+      {"AV1", ~r/av1/i}
+    ]
+  end
 
   # Audio codec patterns (order matters - more specific patterns first)
-  @audio_codecs [
-    {"Atmos", ~r/atmos/i},
-    {"TrueHD", ~r/truehd/i},
-    {"DTS-HD", ~r/dts[\-\s]?hd/i},
-    {"DTS", ~r/dts/i},
-    {"AC3", ~r/ac3|dd(?!p)/i},
-    {"AAC", ~r/aac/i},
-    {"MP3", ~r/mp3/i},
-    {"FLAC", ~r/flac/i},
-    {"Opus", ~r/opus/i},
-    {"Vorbis", ~r/vorbis/i}
-  ]
+  defp audio_codecs do
+    [
+      {"Atmos", ~r/atmos/i},
+      {"TrueHD", ~r/truehd/i},
+      {"DTS-HD", ~r/dts[\-\s]?hd/i},
+      {"DTS", ~r/dts/i},
+      {"AC3", ~r/ac3|dd(?!p)/i},
+      {"AAC", ~r/aac/i},
+      {"MP3", ~r/mp3/i},
+      {"FLAC", ~r/flac/i},
+      {"Opus", ~r/opus/i},
+      {"Vorbis", ~r/vorbis/i}
+    ]
+  end
 
   @doc """
   Parses quality information from a release title.
@@ -155,7 +163,7 @@ defmodule Mydia.Indexers.QualityParser do
   """
   @spec extract_resolution(String.t()) :: String.t() | nil
   def extract_resolution(title) do
-    @resolutions
+    resolutions()
     |> Enum.find_value(fn {label, pattern} ->
       if Regex.match?(pattern, title), do: label
     end)
@@ -177,7 +185,7 @@ defmodule Mydia.Indexers.QualityParser do
   """
   @spec extract_source(String.t()) :: String.t() | nil
   def extract_source(title) do
-    @sources
+    sources()
     |> Enum.find_value(fn {label, pattern} ->
       if Regex.match?(pattern, title), do: label
     end)
@@ -199,7 +207,7 @@ defmodule Mydia.Indexers.QualityParser do
   """
   @spec extract_codec(String.t()) :: String.t() | nil
   def extract_codec(title) do
-    @codecs
+    codecs()
     |> Enum.find_value(fn {label, pattern} ->
       if Regex.match?(pattern, title), do: label
     end)
@@ -221,7 +229,7 @@ defmodule Mydia.Indexers.QualityParser do
   """
   @spec extract_audio(String.t()) :: String.t() | nil
   def extract_audio(title) do
-    @audio_codecs
+    audio_codecs()
     |> Enum.find_value(fn {label, pattern} ->
       if Regex.match?(pattern, title), do: label
     end)

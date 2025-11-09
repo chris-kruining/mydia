@@ -54,17 +54,19 @@ defmodule Mydia.Library.FileParser do
   @release_group_pattern ~r/-([A-Z0-9]+)$/i
 
   # TV show patterns
-  @tv_patterns [
-    # S01E01 or s01e01, with optional multi-episode S01E01-E03 or S01E01E03
-    ~r/[. _-]S(\d{1,2})E(\d{1,2})(?:-?E(\d{1,2}))?/i,
-    # 1x01
-    ~r/[. _-](\d{1,2})x(\d{1,2})/i,
-    # Season 1 Episode 1 (verbose)
-    ~r/Season[. _-](\d{1,2})[. _-]Episode[. _-](\d{1,2})/i
-  ]
+  defp tv_patterns do
+    [
+      # S01E01 or s01e01, with optional multi-episode S01E01-E03 or S01E01E03
+      ~r/[. _-]S(\d{1,2})E(\d{1,2})(?:-?E(\d{1,2}))?/i,
+      # 1x01
+      ~r/[. _-](\d{1,2})x(\d{1,2})/i,
+      # Season 1 Episode 1 (verbose)
+      ~r/Season[. _-](\d{1,2})[. _-]Episode[. _-](\d{1,2})/i
+    ]
+  end
 
   # Year pattern - (2020), [2020], or .2020.
-  @year_pattern ~r/[\(\[. _-](19\d{2}|20\d{2})[\)\]. _-]/
+  defp year_pattern, do: ~r/[\(\[. _-](19\d{2}|20\d{2})[\)\]. _-]/
 
   @doc """
   Parses a file name or path and extracts media metadata.
@@ -223,7 +225,7 @@ defmodule Mydia.Library.FileParser do
 
   defp match_tv_pattern(text) do
     # Try each TV pattern
-    Enum.reduce_while(@tv_patterns, :error, fn pattern, _acc ->
+    Enum.reduce_while(tv_patterns(), :error, fn pattern, _acc ->
       case Regex.run(pattern, text, return: :index) do
         nil ->
           {:cont, :error}
@@ -287,7 +289,7 @@ defmodule Mydia.Library.FileParser do
   end
 
   defp extract_year(text) do
-    case Regex.run(@year_pattern, text) do
+    case Regex.run(year_pattern(), text) do
       [_, year_str] -> String.to_integer(year_str)
       _ -> nil
     end
