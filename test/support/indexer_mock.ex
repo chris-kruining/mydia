@@ -49,10 +49,13 @@ defmodule Mydia.IndexerMock do
     Bypass.stub(bypass, "GET", "/api/v1/system/status", fn conn ->
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
-      |> Plug.Conn.resp(status, Jason.encode!(%{
-        "appName" => "Prowlarr",
-        "version" => version
-      }))
+      |> Plug.Conn.resp(
+        status,
+        Jason.encode!(%{
+          "appName" => "Prowlarr",
+          "version" => version
+        })
+      )
     end)
   end
 
@@ -85,7 +88,8 @@ defmodule Mydia.IndexerMock do
       "infoUrl" => Map.get(result, :info_url, "https://example.com"),
       "indexer" => Map.get(result, :indexer, "Test Indexer"),
       "categoryId" => Map.get(result, :category, 2000),
-      "publishDate" => Map.get(result, :published_at, DateTime.utc_now() |> DateTime.to_iso8601()),
+      "publishDate" =>
+        Map.get(result, :published_at, DateTime.utc_now() |> DateTime.to_iso8601()),
       "tmdbId" => Map.get(result, :tmdb_id),
       "imdbId" => Map.get(result, :imdb_id),
       "downloadProtocol" => Map.get(result, :protocol, "torrent")

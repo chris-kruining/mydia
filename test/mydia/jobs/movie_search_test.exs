@@ -21,13 +21,15 @@ defmodule Mydia.Jobs.MovieSearchTest do
     bypass = Bypass.open()
 
     # Mock with movie results
-    IndexerMock.mock_prowlarr_all(bypass, results: [
-      IndexerMock.movie_result(%{title: "The Matrix", year: 1999, seeders: 100}),
-      IndexerMock.movie_result(%{title: "Inception", year: 2010, seeders: 80}),
-      IndexerMock.movie_result(%{title: "Movie One", year: 2020, seeders: 50}),
-      IndexerMock.movie_result(%{title: "Movie Two", year: 2021, seeders: 45}),
-      IndexerMock.movie_result(%{title: "Movie Three", year: 2022, seeders: 40})
-    ])
+    IndexerMock.mock_prowlarr_all(bypass,
+      results: [
+        IndexerMock.movie_result(%{title: "The Matrix", year: 1999, seeders: 100}),
+        IndexerMock.movie_result(%{title: "Inception", year: 2010, seeders: 80}),
+        IndexerMock.movie_result(%{title: "Movie One", year: 2020, seeders: 50}),
+        IndexerMock.movie_result(%{title: "Movie Two", year: 2021, seeders: 45}),
+        IndexerMock.movie_result(%{title: "Movie Three", year: 2022, seeders: 40})
+      ]
+    )
 
     # Create test indexer configuration pointing to Bypass server
     {:ok, _indexer} =

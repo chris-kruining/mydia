@@ -21,14 +21,18 @@ defmodule Mydia.IndexersTest do
       bypass_disabled = Bypass.open()
 
       # Mock successful search responses
-      IndexerMock.mock_prowlarr_all(bypass1, results: [
-        %{title: "Ubuntu.22.04.1080p", seeders: 100},
-        %{title: "Test.Release.720p", seeders: 50}
-      ])
+      IndexerMock.mock_prowlarr_all(bypass1,
+        results: [
+          %{title: "Ubuntu.22.04.1080p", seeders: 100},
+          %{title: "Test.Release.720p", seeders: 50}
+        ]
+      )
 
-      IndexerMock.mock_prowlarr_all(bypass2, results: [
-        %{title: "Another.Release.1080p", seeders: 75}
-      ])
+      IndexerMock.mock_prowlarr_all(bypass2,
+        results: [
+          %{title: "Another.Release.1080p", seeders: 75}
+        ]
+      )
 
       IndexerMock.mock_prowlarr_all(bypass_disabled)
 
@@ -84,10 +88,12 @@ defmodule Mydia.IndexersTest do
 
     test "filters results by minimum seeders", %{bypass1: bypass1} do
       # Set up mock with results having different seeder counts
-      IndexerMock.mock_prowlarr_search(bypass1, results: [
-        %{title: "Low.seeders", seeders: 2},
-        %{title: "High.seeders", seeders: 100}
-      ])
+      IndexerMock.mock_prowlarr_search(bypass1,
+        results: [
+          %{title: "Low.seeders", seeders: 2},
+          %{title: "High.seeders", seeders: 100}
+        ]
+      )
 
       # Test with minimum 10 seeders - should only return the high seeder result
       assert {:ok, filtered} = Indexers.search_all("test", min_seeders: 10)
@@ -98,9 +104,11 @@ defmodule Mydia.IndexersTest do
 
     test "limits results to max_results option", %{bypass1: bypass1} do
       # Set up mock with many results
-      many_results = Enum.map(1..20, fn i ->
-        %{title: "Result.#{i}", seeders: i * 5}
-      end)
+      many_results =
+        Enum.map(1..20, fn i ->
+          %{title: "Result.#{i}", seeders: i * 5}
+        end)
+
       IndexerMock.mock_prowlarr_search(bypass1, results: many_results)
 
       assert {:ok, results} = Indexers.search_all("popular query", max_results: 5)

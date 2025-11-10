@@ -21,15 +21,27 @@ defmodule Mydia.Jobs.TVShowSearchTest do
     bypass = Bypass.open()
 
     # Mock with TV show episode results
-    IndexerMock.mock_prowlarr_all(bypass, results: [
-      IndexerMock.tv_episode_result(%{title: "Breaking Bad", season: 1, episode: 1, seeders: 100}),
-      IndexerMock.tv_episode_result(%{title: "The Wire", season: 1, episode: 1, seeders: 90}),
-      IndexerMock.tv_episode_result(%{title: "The Sopranos", season: 1, episode: 1, seeders: 85}),
-      IndexerMock.tv_episode_result(%{title: "Show 1", season: 1, episode: 1, seeders: 50}),
-      IndexerMock.tv_episode_result(%{title: "Show 2", season: 1, episode: 1, seeders: 45}),
-      IndexerMock.tv_episode_result(%{title: "Long Show", season: 1, episode: 1, seeders: 40}),
-      IndexerMock.season_pack_result(%{title: "Multi Season Show", season: 1, seeders: 150})
-    ])
+    IndexerMock.mock_prowlarr_all(bypass,
+      results: [
+        IndexerMock.tv_episode_result(%{
+          title: "Breaking Bad",
+          season: 1,
+          episode: 1,
+          seeders: 100
+        }),
+        IndexerMock.tv_episode_result(%{title: "The Wire", season: 1, episode: 1, seeders: 90}),
+        IndexerMock.tv_episode_result(%{
+          title: "The Sopranos",
+          season: 1,
+          episode: 1,
+          seeders: 85
+        }),
+        IndexerMock.tv_episode_result(%{title: "Show 1", season: 1, episode: 1, seeders: 50}),
+        IndexerMock.tv_episode_result(%{title: "Show 2", season: 1, episode: 1, seeders: 45}),
+        IndexerMock.tv_episode_result(%{title: "Long Show", season: 1, episode: 1, seeders: 40}),
+        IndexerMock.season_pack_result(%{title: "Multi Season Show", season: 1, seeders: 150})
+      ]
+    )
 
     # Create test indexer configuration pointing to Bypass server
     {:ok, _indexer} =
