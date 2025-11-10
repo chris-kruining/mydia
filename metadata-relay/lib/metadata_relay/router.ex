@@ -27,6 +27,21 @@ defmodule MetadataRelay.Router do
     |> send_resp(200, Jason.encode!(response))
   end
 
+  # Cache statistics endpoint
+  get "/stats" do
+    cache_stats = MetadataRelay.Cache.stats()
+
+    response = %{
+      service: "metadata-relay",
+      version: MetadataRelay.version(),
+      cache: cache_stats
+    }
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(response))
+  end
+
   # TMDB Configuration
   get "/configuration" do
     handle_tmdb_request(conn, fn -> Handler.configuration() end)

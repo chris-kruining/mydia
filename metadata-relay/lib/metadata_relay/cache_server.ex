@@ -10,13 +10,16 @@ defmodule MetadataRelay.CacheServer do
   require Logger
 
   @table_name :metadata_relay_cache
-  @cleanup_interval :timer.minutes(5)
-  @max_entries 1000
+  @cleanup_interval :timer.minutes(15)
+  @max_entries 20_000
 
-  # TTL values in milliseconds
-  @metadata_ttl :timer.hours(24)
-  @images_ttl :timer.hours(24 * 7)
+  # TTL values in milliseconds - aggressive caching for better hit rates
+  @metadata_ttl :timer.hours(24 * 30)
+  @images_ttl :timer.hours(24 * 90)
   @trending_ttl :timer.hours(1)
+  @search_ttl :timer.hours(24 * 7)
+  @details_ttl :timer.hours(24 * 30)
+  @season_ttl :timer.hours(24 * 14)
 
   ## Client API
 
@@ -62,7 +65,17 @@ defmodule MetadataRelay.CacheServer do
 
   def stats do
     size = :ets.info(@table_name, :size)
-    %{size: size, max_entries: @max_entries}
+    memory_words = :ets.info(@table_name, :memory)
+    memory_bytes = memory_words * :erlang.system_info(:wordsize)
+    memory_mb = Float.round(memory_bytes / 1_024_000, 2)
+
+    %{
+      size: size,
+      max_entries: @max_entries,
+      memory_mb: memory_mb,
+      memory_bytes: memory_bytes,
+      utilization_pct: Float.round(size / @max_entries * 100, 1)
+    }
   end
 
   ## Server Callbacks
@@ -92,9 +105,29 @@ defmodule MetadataRelay.CacheServer do
 
   defp auto_ttl(key) do
     cond do
-      String.contains?(key, "/images") -> @images_ttl
-      String.contains?(key, "/trending") -> @trending_ttl
-      true -> @metadata_ttl
+      # Images never change at a given path - longest TTL
+      String.contains?(key, "/images") ->
+        @images_ttl
+
+      # Trending data changes frequently - keep fresh
+      String.contains?(key, "/trending") ->
+        @trending_ttl
+
+      # Search results - moderate caching
+      String.contains?(key, "/search") ->
+        @search_ttl
+
+      # Specific movie/TV show details by ID - very stable data
+      String.match?(key, ~r{/(movies|tv/shows)/\d+:(?!search)}) ->
+        @details_ttl
+
+      # Season/episode data - stable once aired
+      String.contains?(key, "/tv/shows/") and String.match?(key, ~r{/\d+/\d+:}) ->
+        @season_ttl
+
+      # Default for other endpoints
+      true ->
+        @metadata_ttl
     end
   end
 

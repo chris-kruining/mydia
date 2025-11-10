@@ -7,10 +7,12 @@ defmodule MetadataRelay.Cache do
 
   ## Cache Configuration
 
-  - Metadata (series, movies, episodes): 24 hours TTL
-  - Images: 7 days TTL
+  - Movie/TV details by ID: 30 days TTL
+  - Images: 90 days TTL (images never change)
+  - Season/episode data: 14 days TTL
+  - Search results: 7 days TTL
   - Trending: 1 hour TTL
-  - Max entries: 1000 (LRU eviction)
+  - Max entries: 20,000 (~160MB, LRU eviction)
 
   ## Cache Keys
 
