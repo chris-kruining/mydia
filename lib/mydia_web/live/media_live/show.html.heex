@@ -39,7 +39,7 @@
           <%!-- Quick Actions --%>
           <div class="flex flex-col gap-2">
             <%!-- Play Button (for content with media files) --%>
-            <%= if @media_item.type == "movie" && length(@media_item.media_files) > 0 do %>
+            <%= if @playback_enabled && @media_item.type == "movie" && length(@media_item.media_files) > 0 do %>
               <.link
                 navigate={~p"/play/movie/#{@media_item.id}"}
                 class="btn btn-primary btn-block"
@@ -51,7 +51,7 @@
             <% end %>
 
             <%!-- Play Next Button (for TV shows with next episode) --%>
-            <%= if @media_item.type == "tv_show" && @next_episode do %>
+            <%= if @playback_enabled && @media_item.type == "tv_show" && @next_episode do %>
               <.link
                 navigate={~p"/play/episode/#{@next_episode.id}"}
                 class="btn btn-primary btn-block"
@@ -407,7 +407,7 @@
                               <td>
                                 <div class="flex gap-1">
                                   <%!-- Play button (if episode has media files) --%>
-                                  <%= if length(episode.media_files) > 0 do %>
+                                  <%= if @playback_enabled && length(episode.media_files) > 0 do %>
                                     <.link
                                       navigate={~p"/play/episode/#{episode.id}"}
                                       class="btn btn-success btn-xs"

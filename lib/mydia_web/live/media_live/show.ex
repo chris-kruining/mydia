@@ -94,6 +94,8 @@ defmodule MydiaWeb.MediaLive.Show do
      # Next episode for TV shows
      |> assign(:next_episode, next_episode)
      |> assign(:next_episode_state, next_episode_state)
+     # Feature flags
+     |> assign(:playback_enabled, playback_enabled?())
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -1724,5 +1726,11 @@ defmodule MydiaWeb.MediaLive.Show do
         # Use a placeholder or the series poster
         nil
     end
+  end
+
+  # Check if playback feature is enabled
+  defp playback_enabled? do
+    Application.get_env(:mydia, :features, [])
+    |> Keyword.get(:playback_enabled, false)
   end
 end

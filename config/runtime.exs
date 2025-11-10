@@ -158,66 +158,88 @@ if config_env() == :prod do
     end
 
   config :logger, level: log_level
+
+  # Feature flags configuration
+  playback_enabled =
+    case System.get_env("ENABLE_PLAYBACK") do
+      "true" -> true
+      "false" -> false
+      _ -> Application.get_env(:mydia, :features)[:playback_enabled] || false
+    end
+
+  config :mydia, :features, playback_enabled: playback_enabled
+end
+
+# Feature flags configuration for dev/test (reads from environment variable)
+if config_env() in [:dev, :test] do
+  playback_enabled =
+    case System.get_env("ENABLE_PLAYBACK") do
+      "true" -> true
+      "false" -> false
+      _ -> Application.get_env(:mydia, :features)[:playback_enabled] || false
+    end
+
+  config :mydia, :features, playback_enabled: playback_enabled
 end
 
 # Ueberauth OIDC configuration (all environments)
 # This runs at application startup, so environment variables are available
 # NOTE: This will also reconfigure OIDC for dev/test if env vars change at runtime,
 # which is useful for testing and Docker deployments where env vars are set at startup.
-  # Support both OIDC_ISSUER and OIDC_DISCOVERY_DOCUMENT_URI
-  oidc_issuer =
-    System.get_env("OIDC_ISSUER") ||
-      case System.get_env("OIDC_DISCOVERY_DOCUMENT_URI") do
-        nil ->
-          nil
+# Support both OIDC_ISSUER and OIDC_DISCOVERY_DOCUMENT_URI
+oidc_issuer =
+  System.get_env("OIDC_ISSUER") ||
+    case System.get_env("OIDC_DISCOVERY_DOCUMENT_URI") do
+      nil ->
+        nil
 
-        discovery_uri ->
-          # Extract issuer from discovery document URI
-          # e.g., "https://auth.example.com/.well-known/openid-configuration" -> "https://auth.example.com"
-          discovery_uri
-          |> String.replace(~r/\/\.well-known\/openid-configuration$/, "")
-      end
+      discovery_uri ->
+        # Extract issuer from discovery document URI
+        # e.g., "https://auth.example.com/.well-known/openid-configuration" -> "https://auth.example.com"
+        discovery_uri
+        |> String.replace(~r/\/\.well-known\/openid-configuration$/, "")
+    end
 
-  oidc_client_id = System.get_env("OIDC_CLIENT_ID")
-  oidc_client_secret = System.get_env("OIDC_CLIENT_SECRET")
+oidc_client_id = System.get_env("OIDC_CLIENT_ID")
+oidc_client_secret = System.get_env("OIDC_CLIENT_SECRET")
 
-  if oidc_issuer && oidc_client_id && oidc_client_secret do
-    require Logger
-    Logger.info("Configuring Ueberauth with OIDC for production")
-    Logger.info("Issuer: #{oidc_issuer}")
-    Logger.info("Client ID: #{oidc_client_id}")
+if oidc_issuer && oidc_client_id && oidc_client_secret do
+  require Logger
+  Logger.info("Configuring Ueberauth with OIDC for production")
+  Logger.info("Issuer: #{oidc_issuer}")
+  Logger.info("Client ID: #{oidc_client_id}")
 
-    # Configure oidcc library settings
-    config :oidcc, :provider_configuration_opts, %{request_opts: %{transport_opts: []}}
+  # Configure oidcc library settings
+  config :oidcc, :provider_configuration_opts, %{request_opts: %{transport_opts: []}}
 
-    # Step 1: Configure the OIDC issuer (required by ueberauth_oidcc)
-    config :ueberauth_oidcc, :issuers, [
-      %{name: :default_issuer, issuer: oidc_issuer}
+  # Step 1: Configure the OIDC issuer (required by ueberauth_oidcc)
+  config :ueberauth_oidcc, :issuers, [
+    %{name: :default_issuer, issuer: oidc_issuer}
+  ]
+
+  # Step 2: Configure Ueberauth provider with optimal compatibility settings
+  config :ueberauth, Ueberauth,
+    providers: [
+      oidc:
+        {Ueberauth.Strategy.Oidcc,
+         [
+           issuer: :default_issuer,
+           client_id: oidc_client_id,
+           client_secret: oidc_client_secret,
+           scopes: ["openid", "profile", "email"],
+           callback_path: "/auth/oidc/callback",
+           userinfo: true,
+           uid_field: "sub",
+           # Use standard OAuth2 auth methods for maximum compatibility
+           # Works with all OIDC providers without requiring special client configuration
+           preferred_auth_methods: [:client_secret_post, :client_secret_basic],
+           # Use standard OAuth2 response mode (universally supported)
+           response_mode: "query"
+         ]}
     ]
 
-    # Step 2: Configure Ueberauth provider with optimal compatibility settings
-    config :ueberauth, Ueberauth,
-      providers: [
-        oidc:
-          {Ueberauth.Strategy.Oidcc,
-           [
-             issuer: :default_issuer,
-             client_id: oidc_client_id,
-             client_secret: oidc_client_secret,
-             scopes: ["openid", "profile", "email"],
-             callback_path: "/auth/oidc/callback",
-             userinfo: true,
-             uid_field: "sub",
-             # Use standard OAuth2 auth methods for maximum compatibility
-             # Works with all OIDC providers without requiring special client configuration
-             preferred_auth_methods: [:client_secret_post, :client_secret_basic],
-             # Use standard OAuth2 response mode (universally supported)
-             response_mode: "query"
-           ]}
-      ]
-
-    Logger.info("Ueberauth OIDC configured successfully!")
-  else
-    require Logger
-    Logger.info("OIDC not configured - missing environment variables")
-  end
+  Logger.info("Ueberauth OIDC configured successfully!")
+else
+  require Logger
+  Logger.info("OIDC not configured - missing environment variables")
+end

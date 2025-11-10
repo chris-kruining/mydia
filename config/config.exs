@@ -127,6 +127,13 @@ config :mydia, :episode_monitor,
   # Set to 0 to disable delays, 250-500ms recommended for respectful API usage
   search_delay_ms: 250
 
+# Feature flags
+config :mydia, :features,
+  # Enable/disable media playback feature (Play Movie, Play Episode buttons)
+  # Set to false to hide playback controls from the UI
+  # Can be overridden via ENABLE_PLAYBACK environment variable
+  playback_enabled: false
+
 # Configure Ueberauth with empty providers by default
 # This is overridden in dev.exs if OIDC is configured
 config :ueberauth, Ueberauth, providers: []
