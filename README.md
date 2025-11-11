@@ -10,6 +10,7 @@ A modern, self-hosted media management platform for tracking, organizing, and mo
 - 📺 **Smart Media Library** – Track TV shows, movies, and episodes with rich metadata from TMDB/TVDB
 - 🔍 **Media Discovery** – Search and add content with automatic metadata matching and disambiguation
 - 📁 **Library Scanner** – Automatic scanning and import of existing media files
+- 🎯 **Advanced Filename Parser** – Intelligent extraction of titles, quality, codecs, and release groups using sequential pattern matching. Handles codec variations automatically (DDP5.1, DD5.1, x264, x.264) without maintenance
 - 🎬 **Detailed Media Pages** – View comprehensive information including cast, crew, seasons, and episodes
 - 📊 **Quality Profiles** – Customizable quality preferences for automated downloads
 
