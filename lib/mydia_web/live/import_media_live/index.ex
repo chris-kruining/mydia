@@ -30,7 +30,9 @@ defmodule MydiaWeb.ImportMediaLive.Index do
      |> assign(:editing_file_index, nil)
      |> assign(:edit_form, nil)
      |> assign(:search_query, "")
-     |> assign(:search_results, [])}
+     |> assign(:search_results, [])
+     |> assign(:path_suggestions, [])
+     |> assign(:show_path_suggestions, false)}
   end
 
   @impl true
@@ -43,6 +45,28 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   @impl true
   def handle_event("update_path", %{"value" => path}, socket) do
     {:noreply, assign(socket, :scan_path, path)}
+  end
+
+  def handle_event("autocomplete_path", %{"path" => path}, socket) do
+    suggestions = suggest_directories(path)
+
+    {:noreply,
+     socket
+     |> assign(:scan_path, path)
+     |> assign(:path_suggestions, suggestions)
+     |> assign(:show_path_suggestions, suggestions != [])}
+  end
+
+  def handle_event("select_path_suggestion", %{"path" => path}, socket) do
+    {:noreply,
+     socket
+     |> assign(:scan_path, path)
+     |> assign(:show_path_suggestions, false)
+     |> assign(:path_suggestions, [])}
+  end
+
+  def handle_event("hide_path_suggestions", _params, socket) do
+    {:noreply, assign(socket, :show_path_suggestions, false)}
   end
 
   def handle_event("select_library_path", %{"path_id" => path_id}, socket) do
@@ -204,24 +228,43 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     index = String.to_integer(index_str)
     matched_file = Enum.at(socket.assigns.matched_files, index)
 
-    if matched_file && matched_file.match_result do
-      match = matched_file.match_result
-      parsed_info = match.parsed_info
+    if matched_file do
+      # Handle both matched and unmatched files
+      edit_form =
+        if matched_file.match_result do
+          # Existing match - populate with current values
+          match = matched_file.match_result
+          parsed_info = match.parsed_info
 
-      edit_form = %{
-        "title" => match.title,
-        "provider_id" => match.provider_id,
-        "year" => to_string(match.year || ""),
-        "season" => to_string(parsed_info.season || ""),
-        "episodes" => Enum.join(parsed_info.episodes || [], ", "),
-        "type" => to_string(parsed_info.type)
-      }
+          %{
+            "title" => match.title,
+            "provider_id" => match.provider_id,
+            "year" => to_string(match.year || ""),
+            "season" => to_string(parsed_info.season || ""),
+            "episodes" => Enum.join(parsed_info.episodes || [], ", "),
+            "type" => to_string(parsed_info.type)
+          }
+        else
+          # No match - start with empty form but pre-populate with filename hint
+          filename = Path.basename(matched_file.file.path, Path.extname(matched_file.file.path))
+
+          %{
+            "title" => filename,
+            "provider_id" => "",
+            "year" => "",
+            "season" => "",
+            "episodes" => "",
+            "type" => "movie"
+          }
+        end
+
+      search_query = if matched_file.match_result, do: matched_file.match_result.title, else: ""
 
       {:noreply,
        socket
        |> assign(:editing_file_index, index)
        |> assign(:edit_form, edit_form)
-       |> assign(:search_query, match.title)
+       |> assign(:search_query, search_query)
        |> assign(:search_results, [])}
     else
       {:noreply, socket}
@@ -246,20 +289,38 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       # Parse and validate the form data
       with {:ok, season} <- parse_optional_int(form_params["season"]),
            {:ok, episodes} <- parse_episode_list(form_params["episodes"]) do
-        # Build updated match result
+        # Build updated or new match result
         updated_match =
-          Map.merge(matched_file.match_result, %{
-            title: form_params["title"],
-            provider_id: form_params["provider_id"],
-            year: parse_optional_int_value(form_params["year"]),
-            manually_edited: true,
-            parsed_info:
-              Map.merge(matched_file.match_result.parsed_info, %{
+          if matched_file.match_result do
+            # Update existing match
+            Map.merge(matched_file.match_result, %{
+              title: form_params["title"],
+              provider_id: form_params["provider_id"],
+              year: parse_optional_int_value(form_params["year"]),
+              manually_edited: true,
+              parsed_info:
+                Map.merge(matched_file.match_result.parsed_info, %{
+                  season: season,
+                  episodes: episodes,
+                  type: String.to_atom(form_params["type"])
+                })
+            })
+          else
+            # Create new match for previously unmatched file
+            %{
+              title: form_params["title"],
+              provider_id: form_params["provider_id"],
+              year: parse_optional_int_value(form_params["year"]),
+              match_confidence: 1.0,
+              manually_edited: true,
+              metadata: %{},
+              parsed_info: %{
                 season: season,
                 episodes: episodes,
                 type: String.to_atom(form_params["type"])
-              })
-          })
+              }
+            }
+          end
 
         # Update the matched_file in the list
         updated_matched_file = %{matched_file | match_result: updated_match}
@@ -270,15 +331,33 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         # Re-group files to update the hierarchical view
         grouped_files = group_files_hierarchically(updated_matched_files)
 
+        # Recalculate scan stats if we just matched an unmatched file
+        scan_stats =
+          if matched_file.match_result == nil do
+            %{
+              socket.assigns.scan_stats
+              | matched: socket.assigns.scan_stats.matched + 1,
+                unmatched: socket.assigns.scan_stats.unmatched - 1
+            }
+          else
+            socket.assigns.scan_stats
+          end
+
+        flash_message =
+          if matched_file.match_result,
+            do: "Match updated successfully",
+            else: "Match created successfully"
+
         {:noreply,
          socket
          |> assign(:matched_files, updated_matched_files)
          |> assign(:grouped_files, grouped_files)
+         |> assign(:scan_stats, scan_stats)
          |> assign(:editing_file_index, nil)
          |> assign(:edit_form, nil)
          |> assign(:search_query, "")
          |> assign(:search_results, [])
-         |> put_flash(:info, "Match updated successfully")}
+         |> put_flash(:info, flash_message)}
       else
         {:error, message} ->
           {:noreply, put_flash(socket, :error, message)}
@@ -288,7 +367,15 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     end
   end
 
+  def handle_event("search_series", %{"edit_form" => %{"title" => query}}, socket) do
+    perform_search(query, socket)
+  end
+
   def handle_event("search_series", %{"query" => query}, socket) do
+    perform_search(query, socket)
+  end
+
+  defp perform_search(query, socket) do
     if String.trim(query) != "" && String.length(query) >= 2 do
       # Search both movies and TV shows
       config = socket.assigns.metadata_config
@@ -977,5 +1064,72 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
   defp series_key(match_result) when is_map(match_result) do
     "#{match_result.title}-#{match_result.provider_id}"
+  end
+
+  # Suggest directories based on partial path input
+  defp suggest_directories(path) when is_binary(path) do
+    # Only suggest if path is at least 2 characters
+    if String.length(String.trim(path)) < 2 do
+      []
+    else
+      # Determine the directory to list and the filter prefix
+      {dir_to_list, filter_prefix} = parse_path_for_suggestions(path)
+
+      case list_directories_safe(dir_to_list) do
+        {:ok, entries} ->
+          entries
+          |> Enum.filter(fn entry ->
+            String.starts_with?(entry, filter_prefix)
+          end)
+          |> Enum.take(10)
+          |> Enum.map(fn entry ->
+            Path.join(dir_to_list, entry)
+          end)
+
+        {:error, _reason} ->
+          []
+      end
+    end
+  end
+
+  # Parse the path to determine which directory to list and what to filter by
+  defp parse_path_for_suggestions(path) do
+    path = String.trim(path)
+
+    cond do
+      # If path ends with /, list that directory
+      String.ends_with?(path, "/") ->
+        {path, ""}
+
+      # If path contains /, split into directory and prefix
+      String.contains?(path, "/") ->
+        dir = Path.dirname(path)
+        basename = Path.basename(path)
+        {dir, basename}
+
+      # Otherwise, list root and filter by the entire path
+      true ->
+        {"/", path}
+    end
+  end
+
+  # Safely list directories with error handling
+  defp list_directories_safe(dir) do
+    case File.ls(dir) do
+      {:ok, entries} ->
+        # Filter to only include directories
+        directories =
+          entries
+          |> Enum.filter(fn entry ->
+            full_path = Path.join(dir, entry)
+            File.dir?(full_path)
+          end)
+          |> Enum.sort()
+
+        {:ok, directories}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 end

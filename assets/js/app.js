@@ -71,6 +71,62 @@ const ThemeToggle = {
   }
 }
 
+// Path autocomplete hook with keyboard navigation
+const PathAutocomplete = {
+  mounted() {
+    this.selectedIndex = -1
+
+    this.el.addEventListener('keydown', (e) => {
+      const suggestions = document.getElementById('path-suggestions')
+      if (!suggestions) return
+
+      const buttons = suggestions.querySelectorAll('button')
+      if (buttons.length === 0) return
+
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault()
+          this.selectedIndex = Math.min(this.selectedIndex + 1, buttons.length - 1)
+          this.highlightSelected(buttons)
+          break
+        case 'ArrowUp':
+          e.preventDefault()
+          this.selectedIndex = Math.max(this.selectedIndex - 1, -1)
+          this.highlightSelected(buttons)
+          break
+        case 'Enter':
+          if (this.selectedIndex >= 0 && this.selectedIndex < buttons.length) {
+            e.preventDefault()
+            buttons[this.selectedIndex].click()
+            this.selectedIndex = -1
+          }
+          break
+        case 'Escape':
+          e.preventDefault()
+          this.pushEvent('hide_path_suggestions')
+          this.selectedIndex = -1
+          break
+      }
+    })
+  },
+
+  highlightSelected(buttons) {
+    buttons.forEach((btn, idx) => {
+      if (idx === this.selectedIndex) {
+        btn.classList.add('bg-base-200')
+        btn.scrollIntoView({ block: 'nearest' })
+      } else {
+        btn.classList.remove('bg-base-200')
+      }
+    })
+  },
+
+  updated() {
+    // Reset selected index when suggestions update
+    this.selectedIndex = -1
+  }
+}
+
 // Initialize Alpine.js FIRST (before LiveView)
 window.Alpine = Alpine
 
@@ -84,7 +140,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, ThemeToggle, VideoPlayer},
+  hooks: {...colocatedHooks, ThemeToggle, VideoPlayer, PathAutocomplete},
 })
 
 // Show progress bar on live navigation and form submits
