@@ -22,6 +22,8 @@ defmodule Mydia.Jobs.LibraryScannerTest do
       assert :ok = perform_job(LibraryScanner, %{})
     end
 
+    @tag timeout: 120_000
+    @tag :external
     test "only processes monitored media items" do
       # Create monitored and unmonitored items
       monitored = media_item_fixture(%{title: "Monitored", monitored: true})

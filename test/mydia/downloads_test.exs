@@ -249,6 +249,9 @@ defmodule Mydia.DownloadsTest do
         end
       end)
 
+      # Also unregister the mock adapter so no clients are available at all
+      Mydia.Downloads.Client.Registry.unregister(:transmission)
+
       search_result = %SearchResult{
         title: "Test",
         size: 1000,
