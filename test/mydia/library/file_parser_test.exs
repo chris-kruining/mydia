@@ -439,5 +439,20 @@ defmodule Mydia.Library.FileParserTest do
       assert result.year == 2021
       assert result.quality.resolution == "1080p"
     end
+
+    test "parses movie with VMAF quality metric" do
+      result =
+        FileParser.parse("Dune.Part.Two.2024.HDR.BluRay.2160p.x265.7.1.aac.VMAF96-Rosy.mkv")
+
+      assert result.type == :movie
+      assert result.title == "Dune Part Two"
+      assert result.year == 2024
+      assert result.quality.resolution == "2160p"
+      assert result.quality.source == "BluRay"
+      assert result.quality.codec == "x265"
+      assert result.quality.hdr_format == "HDR"
+      assert result.quality.audio == "AAC"
+      assert result.release_group == "Rosy"
+    end
   end
 end

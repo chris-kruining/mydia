@@ -49,6 +49,8 @@ defmodule Mydia.Library.FileParser do
   @extra_noise_pattern ~r/\b(PROPER|REPACK|INTERNAL|LIMITED|UNRATED|DIRECTORS?\.CUT|EXTENDED|THEATRICAL)\b/i
   # Audio channel indicators (after dot normalization)
   @audio_channels_pattern ~r/\b[257]\s+1\b/i
+  # VMAF quality metric pattern (e.g., VMAF96, VMAF95.5)
+  @vmaf_pattern ~r/\bVMAF\d+(?:\.\d+)?\b/i
 
   # Common release group patterns (hyphen prefix)
   @release_group_pattern ~r/-([A-Z0-9]+)$/i
@@ -318,6 +320,7 @@ defmodule Mydia.Library.FileParser do
     |> remove_bit_depth()
     |> remove_encoders()
     |> remove_audio_channels()
+    |> remove_vmaf()
     |> remove_bracket_contents()
     |> remove_extra_noise()
   end
@@ -352,6 +355,10 @@ defmodule Mydia.Library.FileParser do
 
   defp remove_audio_channels(text) do
     String.replace(text, @audio_channels_pattern, " ")
+  end
+
+  defp remove_vmaf(text) do
+    String.replace(text, @vmaf_pattern, " ")
   end
 
   defp remove_bracket_contents(text) do
