@@ -3,6 +3,9 @@ defmodule Mydia.System do
   System information helpers for application version, environment, etc.
   """
 
+  # Capture the environment at compile time so it's available in releases
+  @env Mix.env()
+
   @doc """
   Get the application version from mix.exs.
   """
@@ -17,6 +20,6 @@ defmodule Mydia.System do
   Check if running in development mode.
   """
   def dev_mode? do
-    Mix.env() == :dev
+    @env == :dev
   end
 end
