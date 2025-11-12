@@ -746,6 +746,7 @@ defmodule Mydia.Jobs.LibraryScanner do
   # Parses an air date string
   defp parse_air_date(nil), do: nil
   defp parse_air_date(""), do: nil
+  defp parse_air_date(%Date{} = date), do: date
 
   defp parse_air_date(date_string) when is_binary(date_string) do
     case Date.from_iso8601(date_string) do
