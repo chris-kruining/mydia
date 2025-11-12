@@ -449,20 +449,44 @@ defmodule MydiaWeb.ImportMediaLive.Components do
         <div class="flex-1 min-w-0">
           <div class="flex items-center justify-between gap-3">
             <div class="flex-1 min-w-0">
-              <p class="font-medium text-sm truncate">
-                {Path.basename(@episode.file.path)}
-              </p>
-              <div class="flex items-center gap-2 text-xs text-base-content/60">
-                <%= if match.parsed_info.episodes do %>
-                  <span>
-                    Ep. {Enum.join(match.parsed_info.episodes, ", ")}
-                  </span>
-                <% end %>
-                <span>•</span>
-                <span>{format_file_size(@episode.file.size)}</span>
-              </div>
+              <%= if Map.get(match, :match_type) == :partial_match do %>
+                <p class="font-semibold text-sm truncate text-warning">
+                  {match.title}
+                  <%= if match.parsed_info.season do %>
+                    - S{String.pad_leading(to_string(match.parsed_info.season), 2, "0")}E{String.pad_leading(
+                      to_string(hd(match.parsed_info.episodes || [0])),
+                      2,
+                      "0"
+                    )}
+                  <% end %>
+                </p>
+                <p class="text-xs text-base-content/60 truncate">
+                  Parsed from: {Path.basename(@episode.file.path)}
+                </p>
+                <p class="text-xs text-warning">
+                  Episode not in database - will import with parsed info
+                </p>
+              <% else %>
+                <p class="font-medium text-sm truncate">
+                  {Path.basename(@episode.file.path)}
+                </p>
+                <div class="flex items-center gap-2 text-xs text-base-content/60">
+                  <%= if match.parsed_info.episodes do %>
+                    <span>
+                      Ep. {Enum.join(match.parsed_info.episodes, ", ")}
+                    </span>
+                  <% end %>
+                  <span>•</span>
+                  <span>{format_file_size(@episode.file.size)}</span>
+                </div>
+              <% end %>
             </div>
             <div class="flex items-center gap-2">
+              <%= if Map.get(match, :match_type) == :partial_match do %>
+                <div class="badge badge-xs badge-warning gap-1">
+                  <.icon name="hero-exclamation-circle" class="w-3 h-3" /> Partial Match
+                </div>
+              <% end %>
               <%= if Map.get(match, :manually_edited, false) do %>
                 <div class="badge badge-xs badge-info gap-1">
                   <.icon name="hero-pencil" class="w-3 h-3" /> Edited
@@ -754,9 +778,39 @@ defmodule MydiaWeb.ImportMediaLive.Components do
               <p class="font-semibold text-sm truncate text-error">
                 {Path.basename(@file.file.path)}
               </p>
-              <p class="text-xs text-base-content/60 truncate">
-                {@file.file.path}
-              </p>
+              <%= if parsed_info = Map.get(@file.file, :parsed_info) do %>
+                <%= if parsed_info.type == :tv_show && parsed_info.title do %>
+                  <p class="text-xs text-base-content/70 mt-1">
+                    <span class="font-medium">Parsed as:</span>
+                    {parsed_info.title}
+                    <%= if parsed_info.season && parsed_info.episodes do %>
+                      S{String.pad_leading(to_string(parsed_info.season), 2, "0")}E{String.pad_leading(
+                        to_string(hd(parsed_info.episodes)),
+                        2,
+                        "0"
+                      )}
+                    <% end %>
+                  </p>
+                  <p class="text-xs text-warning">
+                    Series or episode not found in database
+                  </p>
+                <% else %>
+                  <%= if parsed_info.title do %>
+                    <p class="text-xs text-base-content/70 mt-1">
+                      <span class="font-medium">Parsed as:</span>
+                      {parsed_info.title}
+                      <%= if parsed_info.year do %>
+                        ({parsed_info.year})
+                      <% end %>
+                    </p>
+                    <p class="text-xs text-warning">Not found in database</p>
+                  <% end %>
+                <% end %>
+              <% else %>
+                <p class="text-xs text-base-content/60 truncate">
+                  {@file.file.path}
+                </p>
+              <% end %>
               <p class="text-xs text-base-content/50">
                 {format_file_size(@file.file.size)}
               </p>

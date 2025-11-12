@@ -14,12 +14,15 @@ defmodule Mydia.Library.MetadataMatcher do
   alias Mydia.Library.FileParser.V2, as: FileParser
 
   @type match_result :: %{
-          provider_id: String.t(),
-          provider_type: atom(),
-          title: String.t(),
-          year: integer() | nil,
-          match_confidence: float(),
-          metadata: map()
+          required(:provider_id) => String.t(),
+          required(:provider_type) => atom(),
+          required(:title) => String.t(),
+          required(:year) => integer() | nil,
+          required(:match_confidence) => float(),
+          required(:metadata) => map(),
+          optional(:match_type) => :full_match | :partial_match,
+          optional(:partial_reason) => :episode_not_found | :season_not_found,
+          optional(:parsed_info) => map()
         }
 
   @doc """
@@ -174,10 +177,12 @@ defmodule Mydia.Library.MetadataMatcher do
               select_best_tv_match(results, parsed)
 
             _ ->
-              {:error, :no_matches_found}
+              # Try series-level fallback for partial match
+              try_series_level_match(parsed, config, opts)
           end
         else
-          {:error, :no_matches_found}
+          # Try series-level fallback for partial match
+          try_series_level_match(parsed, config, opts)
         end
 
       {:ok, results} ->
@@ -190,6 +195,88 @@ defmodule Mydia.Library.MetadataMatcher do
   end
 
   ## Private Functions
+
+  # Try to match at series level when episode-specific match fails
+  # This creates a "partial match" for future/unreleased episodes
+  defp try_series_level_match(parsed, config, opts) do
+    Logger.debug("Attempting series-level match for partial match support",
+      title: parsed.title,
+      season: parsed.season,
+      episodes: parsed.episodes
+    )
+
+    # Search for the series (without specific episode constraints)
+    search_opts =
+      [media_type: :tv_show] |> Keyword.merge(Keyword.take(opts, [:language, :include_adult]))
+
+    case Metadata.search(config, parsed.title, search_opts) do
+      {:ok, results} when length(results) > 0 ->
+        # Find best matching series
+        case find_best_series_match(results, parsed) do
+          {:ok, series} ->
+            Logger.info("Found series-level match for future/unreleased episode",
+              series_title: series.title,
+              parsed_season: parsed.season,
+              parsed_episodes: parsed.episodes
+            )
+
+            # Return partial match result
+            {:ok,
+             %{
+               provider_id: to_string(series.provider_id),
+               provider_type: :tmdb,
+               title: series.title,
+               year: series.year,
+               match_confidence: 0.70,
+               # Lower confidence for partial match
+               match_type: :partial_match,
+               partial_reason: :episode_not_found,
+               metadata: series,
+               parsed_info: parsed
+             }}
+
+          {:error, _} ->
+            {:error, :no_matches_found}
+        end
+
+      {:ok, []} ->
+        {:error, :no_matches_found}
+
+      {:error, reason} = error ->
+        Logger.error("Series-level search failed", title: parsed.title, reason: reason)
+        error
+    end
+  end
+
+  # Find the best matching series from search results
+  defp find_best_series_match(results, parsed) do
+    scored_results =
+      Enum.map(results, fn result ->
+        score = calculate_series_match_score(result, parsed)
+        {result, score}
+      end)
+
+    case Enum.max_by(scored_results, fn {_result, score} -> score end, fn -> nil end) do
+      {best_match, score} when score >= 0.5 ->
+        {:ok, best_match}
+
+      _ ->
+        {:error, :low_confidence_match}
+    end
+  end
+
+  # Calculate match score for series-level matching
+  defp calculate_series_match_score(result, parsed) do
+    base_score = 0.5
+
+    score =
+      base_score
+      |> add_score(title_similarity(result.title, parsed.title), 0.35)
+      |> add_score(year_match?(result.year, parsed.year), 0.1)
+      |> add_score(result.popularity > 10, 0.05)
+
+    min(score, 1.0)
+  end
 
   # Try to find a matching movie in the local database
   defp find_local_movie(parsed) do
@@ -349,6 +436,7 @@ defmodule Mydia.Library.MetadataMatcher do
            title: best_match.title,
            year: best_match.year,
            match_confidence: score,
+           match_type: :full_match,
            metadata: best_match,
            parsed_info: parsed
          }}
