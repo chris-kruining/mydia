@@ -12,6 +12,8 @@ services:
       - MIX_ENV=dev
       - TMDB_API_KEY=${TMDB_API_KEY:-your_api_key_here}
       - TVDB_API_KEY=${TVDB_API_KEY:-your_tvdb_key_here}
+      # Redis is optional - comment out to use in-memory caching
+      - REDIS_URL=redis://redis:6379
     volumes:
       # Mount source code for live reloading
       - .:/app
@@ -19,7 +21,20 @@ services:
       - relay_build:/app/_build
       - relay_deps:/app/deps
     command: mix run --no-halt
+    depends_on:
+      - redis
+
+  # Redis cache (optional)
+  # Comment out this service and the REDIS_URL env var above to use in-memory caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
 
 volumes:
   relay_build:
   relay_deps:
+  redis_data:

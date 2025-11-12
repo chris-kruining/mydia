@@ -30,30 +30,53 @@ The Metadata Relay Service acts as an intermediary between the Mydia application
 
 ### Using Docker (Recommended)
 
-1. **Build the container**:
-   ```bash
-   docker-compose build
-   ```
+The Docker Compose configuration includes an optional Redis service for persistent caching. By default, Redis is enabled.
 
-2. **Start the service**:
-   ```bash
-   docker-compose up
-   ```
+**With Redis (default):**
 
-3. **Run in detached mode**:
+1. **Start all services**:
    ```bash
    docker-compose up -d
    ```
+   This starts both the relay service and Redis.
 
-4. **View logs**:
+2. **View logs**:
    ```bash
    docker-compose logs -f relay
    ```
 
-5. **Stop the service**:
+3. **Stop all services**:
    ```bash
    docker-compose down
    ```
+
+**Without Redis (in-memory cache only):**
+
+To use in-memory caching instead of Redis:
+
+1. **Edit docker-compose.yml** and comment out:
+   - The `REDIS_URL` environment variable in the relay service
+   - The entire `redis` service
+   - The `depends_on: redis` line
+   - The `redis_data` volume
+
+2. **Start the service**:
+   ```bash
+   docker-compose up -d
+   ```
+
+**Accessing Redis directly:**
+
+Redis is exposed on port 6379. You can connect using `redis-cli`:
+```bash
+docker-compose exec redis redis-cli
+
+# View cache keys
+KEYS metadata_relay:*
+
+# View cache stats
+INFO stats
+```
 
 ### Using Local Elixir
 
@@ -102,27 +125,129 @@ The service is configured entirely via environment variables for maximum flexibi
 | `PORT` | No | `4000` | HTTP port the server listens on |
 | `TMDB_API_KEY` | Yes | - | API key for The Movie Database. Get one at https://www.themoviedb.org/settings/api |
 | `TVDB_API_KEY` | Yes | - | API key for TheTVDB. Get one at https://thetvdb.com/api-information |
+| `REDIS_URL` | No | - | Redis connection URL for persistent caching. Format: `redis://[password@]host:port`. If not set, uses in-memory caching |
+
+### Cache Configuration
+
+The metadata relay supports two caching backends:
+
+#### In-Memory Cache (Default)
+
+**When to use:**
+- Local development
+- Single-instance deployments
+- When Redis is not available
+
+**Characteristics:**
+- Fast, zero-latency access
+- Cache lost on service restart
+- Limited by available RAM
+- Maximum 20,000 entries with LRU eviction
+
+**Configuration:**
+- No configuration needed
+- Simply don't set `REDIS_URL`
+
+#### Redis Cache (Optional)
+
+**When to use:**
+- Production deployments
+- Multi-instance/horizontal scaling
+- When cache persistence across restarts is needed
+- When sharing cache between multiple services
+
+**Characteristics:**
+- Persistent cache across restarts
+- Shared cache for multiple instances
+- Configurable eviction policies
+- Network latency overhead
+
+**Configuration:**
+Set the `REDIS_URL` environment variable:
+
+```bash
+# Standard Redis
+REDIS_URL=redis://localhost:6379
+
+# Redis with password
+REDIS_URL=redis://password@localhost:6379
+
+# Redis with username and password
+REDIS_URL=redis://username:password@localhost:6379
+```
+
+**Fallback behavior:**
+- If Redis connection fails at startup, service falls back to in-memory cache
+- Service continues to operate normally with degraded caching
+- Connection failures are logged but don't crash the service
 
 ### Development Configuration
 
 Create a `.env` file in the project root:
+
+**Without Redis (default):**
 ```bash
 PORT=4001
 TMDB_API_KEY=your_tmdb_key_here
 TVDB_API_KEY=your_tvdb_key_here
 ```
 
+**With Redis:**
+```bash
+PORT=4001
+TMDB_API_KEY=your_tmdb_key_here
+TVDB_API_KEY=your_tvdb_key_here
+REDIS_URL=redis://localhost:6379
+```
+
 The `.env.example` file provides a template with all available options.
+
+### Cache TTL and Eviction Policies
+
+The service automatically determines cache TTL based on content type:
+
+| Content Type | TTL | Rationale |
+|--------------|-----|-----------|
+| Movie/TV show details by ID | 30 days | Metadata rarely changes once published |
+| Images | 90 days | Image URLs never change |
+| Season/episode data | 14 days | Episode data is stable once aired |
+| Search results | 7 days | Search results change occasionally |
+| Trending content | 1 hour | Trending data changes frequently |
+| Default | 30 days | Conservative default for other endpoints |
+
+**In-Memory Cache Eviction:**
+- Maximum entries: 20,000
+- Eviction policy: LRU (Least Recently Used)
+- Background cleanup: Every 15 minutes
+
+**Redis Cache Eviction:**
+- TTL-based expiration (automatic)
+- No size limits (managed by Redis configuration)
+- Configurable via Redis `maxmemory-policy` setting
 
 ### Production Configuration
 
 In production (Fly.io), environment variables are managed through secrets:
 
+**Without Redis:**
 ```bash
-# Set secrets (do not commit these!)
+# Set required secrets
+fly secrets set TMDB_API_KEY=your_key_here
+fly secrets set TVDB_API_KEY=your_key_here
+```
+
+**With Redis:**
+```bash
+# Set required secrets
 fly secrets set TMDB_API_KEY=your_key_here
 fly secrets set TVDB_API_KEY=your_key_here
 
+# Add Redis URL (e.g., Upstash, Redis Cloud, or self-hosted)
+fly secrets set REDIS_URL=redis://username:password@your-redis-host:6379
+```
+
+**Manage secrets:**
+```bash
 # View configured secrets (values are hidden)
 fly secrets list
 

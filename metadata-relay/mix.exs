@@ -4,7 +4,7 @@ defmodule MetadataRelay.MixProject do
   def project do
     [
       app: :metadata_relay,
-      version: "0.2.2",
+      version: "0.3.0",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -25,7 +25,8 @@ defmodule MetadataRelay.MixProject do
       {:bandit, "~> 1.0"},
       {:plug, "~> 1.15"},
       {:req, "~> 0.4"},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:redix, "~> 1.5"}
     ]
   end
 

@@ -1,26 +1,20 @@
-defmodule MetadataRelay.CacheServer do
+defmodule MetadataRelay.Cache.InMemory do
   @moduledoc """
-  GenServer-based in-memory cache using ETS.
+  In-memory cache adapter using ETS.
 
-  Provides intelligent caching with TTL and size limits to reduce
-  external API calls and prevent rate limiting.
+  Provides fast, local caching with TTL and size limits.
+  Cache contents are lost on service restart.
   """
 
   use GenServer
   require Logger
 
+  @behaviour MetadataRelay.Cache.Adapter
+
   @table_name :metadata_relay_cache
   @stats_table :metadata_relay_cache_stats
   @cleanup_interval :timer.minutes(15)
   @max_entries 20_000
-
-  # TTL values in milliseconds - aggressive caching for better hit rates
-  @metadata_ttl :timer.hours(24 * 30)
-  @images_ttl :timer.hours(24 * 90)
-  @trending_ttl :timer.hours(1)
-  @search_ttl :timer.hours(24 * 7)
-  @details_ttl :timer.hours(24 * 30)
-  @season_ttl :timer.hours(24 * 14)
 
   ## Client API
 
@@ -28,6 +22,7 @@ defmodule MetadataRelay.CacheServer do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  @impl MetadataRelay.Cache.Adapter
   def get(key) do
     case :ets.lookup(@table_name, key) do
       [{^key, value, expires_at}] ->
@@ -48,8 +43,8 @@ defmodule MetadataRelay.CacheServer do
     end
   end
 
-  def put(key, value, opts \\ []) do
-    ttl = determine_ttl(key, opts)
+  @impl MetadataRelay.Cache.Adapter
+  def put(key, value, ttl) do
     expires_at = DateTime.add(DateTime.utc_now(), ttl, :millisecond)
 
     # Check size limit and evict if necessary
@@ -62,11 +57,13 @@ defmodule MetadataRelay.CacheServer do
     :ok
   end
 
+  @impl MetadataRelay.Cache.Adapter
   def clear do
     :ets.delete_all_objects(@table_name)
     :ok
   end
 
+  @impl MetadataRelay.Cache.Adapter
   def stats do
     size = :ets.info(@table_name, :size)
     memory_words = :ets.info(@table_name, :memory)
@@ -79,6 +76,7 @@ defmodule MetadataRelay.CacheServer do
     hit_rate = if total > 0, do: Float.round(hits / total * 100, 1), else: 0.0
 
     %{
+      adapter: "in_memory",
       size: size,
       max_entries: @max_entries,
       memory_mb: memory_mb,
@@ -100,6 +98,7 @@ defmodule MetadataRelay.CacheServer do
     :ets.insert(@stats_table, {:hits, 0})
     :ets.insert(@stats_table, {:misses, 0})
     schedule_cleanup()
+    Logger.info("In-memory cache adapter started")
     {:ok, %{}}
   end
 
@@ -111,41 +110,6 @@ defmodule MetadataRelay.CacheServer do
   end
 
   ## Private Functions
-
-  defp determine_ttl(key, opts) do
-    case Keyword.get(opts, :ttl) do
-      nil -> auto_ttl(key)
-      ttl -> ttl
-    end
-  end
-
-  defp auto_ttl(key) do
-    cond do
-      # Images never change at a given path - longest TTL
-      String.contains?(key, "/images") ->
-        @images_ttl
-
-      # Trending data changes frequently - keep fresh
-      String.contains?(key, "/trending") ->
-        @trending_ttl
-
-      # Search results - moderate caching
-      String.contains?(key, "/search") ->
-        @search_ttl
-
-      # Specific movie/TV show details by ID - very stable data
-      String.match?(key, ~r{/(movies|tv/shows)/\d+:(?!search)}) ->
-        @details_ttl
-
-      # Season/episode data - stable once aired
-      String.contains?(key, "/tv/shows/") and String.match?(key, ~r{/\d+/\d+:}) ->
-        @season_ttl
-
-      # Default for other endpoints
-      true ->
-        @metadata_ttl
-    end
-  end
 
   defp schedule_cleanup do
     Process.send_after(self(), :cleanup, @cleanup_interval)
