@@ -307,7 +307,7 @@ defmodule Mydia.Library do
         codec: file_metadata.codec || filename_metadata.quality.codec,
         audio_codec: file_metadata.audio_codec || filename_metadata.quality.audio,
         bitrate: file_metadata.bitrate,
-        hdr_format: file_metadata.hdr_format || filename_metadata.quality.hdr_format,
+        hdr_format: file_metadata.hdr_format || Map.get(filename_metadata.quality, :hdr_format),
         size: file_metadata.size || File.stat!(media_file.path).size,
         verified_at: DateTime.utc_now()
       }
