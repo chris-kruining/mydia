@@ -90,16 +90,19 @@ defmodule Mydia.Jobs.MetadataRefresh do
   ## Private Functions
 
   defp refresh_media_item(media_item, config, fetch_episodes) do
-    if media_item.tmdb_id do
+    # Try to get tmdb_id from media_item or extract from stored metadata
+    tmdb_id = get_or_extract_tmdb_id(media_item)
+
+    if tmdb_id do
       Logger.info("Refreshing metadata",
         media_item_id: media_item.id,
         title: media_item.title,
-        tmdb_id: media_item.tmdb_id
+        tmdb_id: tmdb_id
       )
 
       media_type = parse_media_type(media_item.type)
 
-      case fetch_updated_metadata(media_item.tmdb_id, media_type, config) do
+      case fetch_updated_metadata(tmdb_id, media_type, config) do
         {:ok, metadata} ->
           attrs = build_update_attrs(metadata, media_type)
 
@@ -129,7 +132,7 @@ defmodule Mydia.Jobs.MetadataRefresh do
         {:error, reason} ->
           Logger.error("Failed to fetch updated metadata",
             media_item_id: media_item.id,
-            tmdb_id: media_item.tmdb_id,
+            tmdb_id: tmdb_id,
             reason: reason
           )
 
@@ -185,9 +188,33 @@ defmodule Mydia.Jobs.MetadataRefresh do
       title: metadata.title || metadata.name,
       original_title: metadata.original_title || metadata.original_name,
       year: extract_year(metadata),
+      tmdb_id: metadata[:id],
       imdb_id: metadata.imdb_id,
       metadata: metadata
     }
+  end
+
+  defp get_or_extract_tmdb_id(media_item) do
+    cond do
+      # If tmdb_id is already set, use it
+      media_item.tmdb_id ->
+        media_item.tmdb_id
+
+      # Try to extract from metadata.id (new format after fix)
+      media_item.metadata && media_item.metadata[:id] ->
+        media_item.metadata[:id]
+
+      # Try to extract from metadata.provider_id (old format)
+      media_item.metadata && media_item.metadata[:provider_id] ->
+        case Integer.parse(media_item.metadata[:provider_id]) do
+          {id, ""} -> id
+          _ -> nil
+        end
+
+      # No tmdb_id available
+      true ->
+        nil
+    end
   end
 
   defp extract_year(metadata) do
