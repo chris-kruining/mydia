@@ -222,10 +222,14 @@
               </td>
               <%!-- Quality & Size Column --%>
               <td>
-                <div class="flex flex-col gap-1.5">
-                  <span class="badge badge-primary text-xs whitespace-normal leading-tight py-2 h-auto">
-                    {get_quality_badge(result)}
-                  </span>
+                <div class="flex flex-col gap-2">
+                  <div class="flex flex-wrap gap-1">
+                    <%= for badge <- get_quality_badges(result) do %>
+                      <span class={"badge badge-sm #{badge.color}"}>
+                        {badge.text}
+                      </span>
+                    <% end %>
+                  </div>
                   <span class="text-xs font-mono text-base-content/70">
                     {format_size(result)}
                   </span>
@@ -236,21 +240,23 @@
                 <div class="flex items-center gap-3">
                   <%!-- Health indicator --%>
                   <div
-                    class="radial-progress text-xs"
-                    style={"--value:#{trunc(health_score(result) * 100)}; --size:2.5rem;"}
+                    class={"radial-progress #{health_color(health_score(result))}"}
+                    style={"--value:#{trunc(health_score(result) * 100)}; --size:3rem; --thickness: 3px;"}
                     role="progressbar"
                   >
-                    {trunc(health_score(result) * 100)}%
+                    <span class="text-xs font-semibold">
+                      {trunc(health_score(result) * 100)}%
+                    </span>
                   </div>
                   <%!-- Seeders/Peers --%>
-                  <div class="flex flex-col text-xs">
-                    <div class="flex items-center gap-1">
-                      <.icon name="hero-arrow-up" class="w-3 h-3 text-success" />
-                      <span class="font-semibold text-success">{result.seeders}</span>
+                  <div class="flex flex-col gap-0.5">
+                    <div class="flex items-center gap-1.5">
+                      <.icon name="hero-arrow-up" class="w-3.5 h-3.5 text-success" />
+                      <span class="text-sm font-semibold text-success">{result.seeders}</span>
                     </div>
-                    <div class="flex items-center gap-1">
-                      <.icon name="hero-arrow-down" class="w-3 h-3 text-info" />
-                      <span class="text-base-content/70">{result.leechers}</span>
+                    <div class="flex items-center gap-1.5">
+                      <.icon name="hero-arrow-down" class="w-3.5 h-3.5 text-base-content/50" />
+                      <span class="text-sm text-base-content/70">{result.leechers}</span>
                     </div>
                   </div>
                 </div>
@@ -373,11 +379,13 @@
               <div class="stat-title text-xs">Health</div>
               <div class="stat-value text-lg">
                 <div
-                  class="radial-progress"
-                  style={"--value:#{trunc(health_score(@selected_result) * 100)}; --size:3rem;"}
+                  class={"radial-progress #{health_color(health_score(@selected_result))}"}
+                  style={"--value:#{trunc(health_score(@selected_result) * 100)}; --size:4rem; --thickness: 4px;"}
                   role="progressbar"
                 >
-                  <span class="text-sm">{trunc(health_score(@selected_result) * 100)}%</span>
+                  <span class="text-sm font-semibold">
+                    {trunc(health_score(@selected_result) * 100)}%
+                  </span>
                 </div>
               </div>
             </div>

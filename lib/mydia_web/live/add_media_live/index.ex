@@ -36,6 +36,9 @@ defmodule MydiaWeb.AddMediaLive.Index do
   end
 
   defp apply_action(socket, :add_series, _params) do
+    require Logger
+    Logger.info("apply_action: :add_series - setting media_type to :tv_show")
+
     socket
     |> assign(:page_title, "Add Series")
     |> assign(:media_type, :tv_show)
@@ -157,6 +160,16 @@ defmodule MydiaWeb.AddMediaLive.Index do
 
   @impl true
   def handle_info({:perform_search, query}, socket) do
+    require Logger
+
+    Logger.info(
+      "perform_search: socket.assigns.media_type = #{inspect(socket.assigns.media_type)}"
+    )
+
+    Logger.info(
+      "perform_search: socket.assigns.live_action = #{inspect(socket.assigns.live_action)}"
+    )
+
     media_type_filter =
       case socket.assigns.media_type do
         :movie -> :movie
@@ -164,10 +177,12 @@ defmodule MydiaWeb.AddMediaLive.Index do
         _ -> nil
       end
 
+    Logger.info("perform_search: media_type_filter = #{inspect(media_type_filter)}")
     opts = [media_type: media_type_filter]
 
     case Metadata.search(socket.assigns.metadata_config, query, opts) do
       {:ok, results} ->
+        Logger.info("perform_search: got #{length(results)} results")
         # Check which results are already in the library
         added_item_ids = check_existing_items(results, socket.assigns.media_type)
 
