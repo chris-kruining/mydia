@@ -870,14 +870,14 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       year: :integer,
       season: :integer,
       episodes: {:array, :integer},
-      type: :atom
+      type: :string
     }
 
     {%{}, types}
     |> Ecto.Changeset.cast(params, [:title, :provider_id, :year, :season, :type])
     |> cast_episode_list(params["episodes"])
     |> Ecto.Changeset.validate_required([:title, :type])
-    |> Ecto.Changeset.validate_inclusion(:type, [:movie, :tv_show])
+    |> Ecto.Changeset.validate_inclusion(:type, ["movie", "tv_show"])
   end
 
   defp validate_search_result(params) do

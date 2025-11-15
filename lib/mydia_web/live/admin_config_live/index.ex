@@ -40,9 +40,6 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{"category" => category, "settings" => settings},
         socket
       ) do
-    # Parse the category
-    parsed_category = parse_category(category)
-
     # Process each changed setting with validation
     results =
       settings
@@ -52,7 +49,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
           validate_config_setting(%{
             key: key,
             value: value,
-            category: parsed_category
+            category: category
           })
 
         if changeset.valid? do
@@ -82,7 +79,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         MydiaLogger.log_error(:liveview, "Failed to update setting",
           error: error,
           operation: :update_setting,
-          category: parsed_category,
+          category: category,
           setting_key: setting_key,
           user_id: socket.assigns.current_user.id
         )
@@ -103,13 +100,11 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         socket
       ) do
     # Handle boolean toggle with validation
-    parsed_category = parse_category(category)
-
     changeset =
       validate_config_setting(%{
         key: key,
         value: to_string(value),
-        category: parsed_category
+        category: category
       })
 
     if changeset.valid? do
@@ -125,7 +120,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
           MydiaLogger.log_error(:liveview, "Failed to toggle setting",
             error: changeset,
             operation: :update_setting,
-            category: parsed_category,
+            category: category,
             setting_key: key,
             user_id: socket.assigns.current_user.id
           )
@@ -997,7 +992,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     types = %{
       key: :string,
       value: :string,
-      category: :atom
+      category: :string
     }
 
     {%{}, types}
@@ -1015,18 +1010,6 @@ defmodule MydiaWeb.AdminConfigLive.Index do
 
       existing ->
         Settings.update_config_setting(existing, attrs_map)
-    end
-  end
-
-  defp parse_category(category_string) do
-    case String.downcase(category_string) do
-      "server" -> :server
-      "database" -> :database
-      "authentication" -> :auth
-      "media" -> :media
-      "downloads" -> :downloads
-      "crash reporting" -> :crash_reporting
-      _ -> :general
     end
   end
 
