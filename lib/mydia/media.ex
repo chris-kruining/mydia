@@ -835,7 +835,7 @@ defmodule Mydia.Media do
                        episode_number: episode_num,
                        title: episode.name,
                        air_date: parse_air_date(episode.air_date),
-                       metadata: episode,
+                       metadata: Map.from_struct(episode),
                        monitored: media_item.monitored
                      }) do
                   {:ok, _episode} -> count + 1
@@ -846,7 +846,7 @@ defmodule Mydia.Media do
                 case update_episode(existing, %{
                        title: episode.name,
                        air_date: parse_air_date(episode.air_date),
-                       metadata: episode
+                       metadata: Map.from_struct(episode)
                      }) do
                   {:ok, _episode} -> count + 1
                   {:error, _changeset} -> count
