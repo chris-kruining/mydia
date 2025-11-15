@@ -418,14 +418,15 @@ defmodule Mydia.Library.MetadataEnricher do
         media_file_id: media_file_id
       )
 
-      case Mydia.Library.get_media_file!(media_file_id) do
+      case Mydia.Library.get_media_file!(media_file_id)
+           |> Mydia.Repo.preload(:library_path) do
         media_file ->
           case Mydia.Library.update_media_file(media_file, %{episode_id: episode.id}) do
             {:ok, _updated_file} ->
               Logger.info("Successfully associated episode with media file",
                 episode_id: episode.id,
                 media_file_id: media_file_id,
-                file_path: media_file.path
+                file_path: Mydia.Library.MediaFile.absolute_path(media_file)
               )
 
             {:error, changeset} ->
@@ -480,13 +481,14 @@ defmodule Mydia.Library.MetadataEnricher do
 
   defp validate_library_type_compatibility(media_type, media_file_id)
        when is_binary(media_file_id) do
-    case Mydia.Repo.get(Mydia.Library.MediaFile, media_file_id) do
+    case Mydia.Repo.get(Mydia.Library.MediaFile, media_file_id)
+         |> Mydia.Repo.preload(:library_path) do
       nil ->
         # Media file not found, let it proceed (will fail later with better error)
         :ok
 
       media_file ->
-        validate_media_type_against_library_path(media_type, media_file.path)
+        validate_media_type_against_library_path(media_type, media_file)
     end
   rescue
     error ->
@@ -500,8 +502,9 @@ defmodule Mydia.Library.MetadataEnricher do
       :ok
   end
 
-  defp validate_media_type_against_library_path(media_type, file_path) do
-    library_path = find_library_path_for_file(file_path)
+  defp validate_media_type_against_library_path(media_type, media_file) do
+    absolute_path = Mydia.Library.MediaFile.absolute_path(media_file)
+    library_path = find_library_path_for_file(absolute_path)
     media_type_string = media_type_to_string(media_type)
 
     cond do
@@ -521,7 +524,7 @@ defmodule Mydia.Library.MetadataEnricher do
           media_type: media_type_string,
           library_path: library_path.path,
           library_type: library_path.type,
-          file_path: file_path
+          file_path: absolute_path
         )
 
         {:error,
@@ -536,7 +539,7 @@ defmodule Mydia.Library.MetadataEnricher do
           media_type: media_type_string,
           library_path: library_path.path,
           library_type: library_path.type,
-          file_path: file_path
+          file_path: absolute_path
         )
 
         {:error,
