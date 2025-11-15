@@ -256,12 +256,9 @@ defmodule Mydia.Jobs.LibraryScanner do
         Enum.each(changes.deleted_files, fn media_file ->
           {:ok, _} = Library.delete_media_file(media_file)
 
-          absolute_path =
-            if media_file.relative_path do
-              Path.join(library_path.path, media_file.relative_path)
-            else
-              media_file.path
-            end
+          # Preload library_path association for path resolution
+          media_file = Mydia.Repo.preload(media_file, :library_path)
+          absolute_path = Mydia.Media.MediaFile.absolute_path(media_file)
 
           Logger.debug("Deleted media file record", path: absolute_path)
         end)
@@ -321,13 +318,9 @@ defmodule Mydia.Jobs.LibraryScanner do
 
             fixed_count =
               Enum.count(completely_orphaned, fn media_file ->
-                # Resolve absolute path for comparison
-                absolute_path =
-                  if media_file.relative_path do
-                    Path.join(library_path.path, media_file.relative_path)
-                  else
-                    media_file.path
-                  end
+                # Preload library_path association for path resolution
+                media_file = Mydia.Repo.preload(media_file, :library_path)
+                absolute_path = Mydia.Media.MediaFile.absolute_path(media_file)
 
                 file_info =
                   Enum.find(result.scan_result.files, fn f -> f.path == absolute_path end)
@@ -416,11 +409,9 @@ defmodule Mydia.Jobs.LibraryScanner do
           sample_paths =
             Enum.take(movies_in_series_libs, 3)
             |> Enum.map(fn file ->
-              if file.relative_path do
-                Path.join(library_path.path, file.relative_path)
-              else
-                file.path
-              end
+              # Preload library_path association for path resolution
+              file = Mydia.Repo.preload(file, :library_path)
+              Mydia.Media.MediaFile.absolute_path(file)
             end)
 
           Logger.warning("Detected movies in series-only library",
@@ -434,11 +425,9 @@ defmodule Mydia.Jobs.LibraryScanner do
           sample_paths =
             Enum.take(tv_in_movies_libs, 3)
             |> Enum.map(fn file ->
-              if file.relative_path do
-                Path.join(library_path.path, file.relative_path)
-              else
-                file.path
-              end
+              # Preload library_path association for path resolution
+              file = Mydia.Repo.preload(file, :library_path)
+              Mydia.Media.MediaFile.absolute_path(file)
             end)
 
           Logger.warning("Detected TV shows in movies-only library",
@@ -641,125 +630,118 @@ defmodule Mydia.Jobs.LibraryScanner do
 
   # Attempts to fix an orphaned TV show file by matching it to an episode
   defp fix_orphaned_tv_file(media_file, metadata_config) do
-    # Resolve path for logging - define at top level so it's available in rescue
-    path_for_log = media_file.relative_path || media_file.path
+    try do
+      # Preload library_path association for path resolution
+      media_file = Mydia.Repo.preload(media_file, :library_path)
+      path_for_log = Mydia.Media.MediaFile.absolute_path(media_file)
 
-    Logger.debug("Attempting to fix orphaned TV file",
-      path: path_for_log,
-      media_item_id: media_file.media_item_id
-    )
+      Logger.debug("Attempting to fix orphaned TV file",
+        path: path_for_log,
+        media_item_id: media_file.media_item_id
+      )
 
-    # Parse the filename to extract season/episode info
-    # Use relative_path if available, otherwise fall back to path
-    filename =
-      if media_file.relative_path do
-        Path.basename(media_file.relative_path)
-      else
-        Path.basename(media_file.path)
-      end
+      # Parse the filename to extract season/episode info
+      filename = Path.basename(media_file.relative_path)
 
-    parsed = FileParser.parse(filename)
+      parsed = FileParser.parse(filename)
 
-    case parsed do
-      %{type: :tv_show, season: season, episodes: episodes}
-      when not is_nil(season) and not is_nil(episodes) ->
-        # Try to find the episode in the database
-        # For multi-episode files, use the first episode
-        episode_number = List.first(episodes)
+      case parsed do
+        %{type: :tv_show, season: season, episodes: episodes}
+        when not is_nil(season) and not is_nil(episodes) ->
+          # Try to find the episode in the database
+          # For multi-episode files, use the first episode
+          episode_number = List.first(episodes)
 
-        case Mydia.Media.get_episode_by_number(media_file.media_item_id, season, episode_number) do
-          nil ->
-            # Episode doesn't exist yet, try to fetch it from TMDB
-            Logger.info("Episode not found, attempting to fetch from TMDB",
-              media_item_id: media_file.media_item_id,
-              season: season,
-              episode: episode_number
-            )
-
-            # Fetch the media item to get TMDB ID
-            media_item = Mydia.Media.get_media_item!(media_file.media_item_id)
-
-            if media_item.tmdb_id do
-              # Fetch season data from TMDB
-              case Metadata.fetch_season(
-                     metadata_config,
-                     to_string(media_item.tmdb_id),
-                     season
-                   ) do
-                {:ok, season_data} ->
-                  # Create episodes for this season
-                  create_episodes_from_season(media_item, season_data)
-
-                  # Try to find the episode again
-                  case Mydia.Media.get_episode_by_number(
-                         media_file.media_item_id,
-                         season,
-                         episode_number
-                       ) do
-                    nil ->
-                      Logger.warning("Episode still not found after TMDB fetch",
-                        media_item_id: media_file.media_item_id,
-                        season: season,
-                        episode: episode_number
-                      )
-
-                      false
-
-                    episode ->
-                      associate_file_with_episode(media_file, episode)
-                  end
-
-                {:error, reason} ->
-                  Logger.warning("Failed to fetch season from TMDB",
-                    media_item_id: media_file.media_item_id,
-                    season: season,
-                    reason: reason
-                  )
-
-                  false
-              end
-            else
-              Logger.warning("Media item has no TMDB ID, cannot fetch episodes",
-                media_item_id: media_file.media_item_id
+          case Mydia.Media.get_episode_by_number(media_file.media_item_id, season, episode_number) do
+            nil ->
+              # Episode doesn't exist yet, try to fetch it from TMDB
+              Logger.info("Episode not found, attempting to fetch from TMDB",
+                media_item_id: media_file.media_item_id,
+                season: season,
+                episode: episode_number
               )
 
-              false
-            end
+              # Fetch the media item to get TMDB ID
+              media_item = Mydia.Media.get_media_item!(media_file.media_item_id)
 
-          episode ->
-            # Episode exists, associate the file with it
-            associate_file_with_episode(media_file, episode)
-        end
+              if media_item.tmdb_id do
+                # Fetch season data from TMDB
+                case Metadata.fetch_season(
+                       metadata_config,
+                       to_string(media_item.tmdb_id),
+                       season
+                     ) do
+                  {:ok, season_data} ->
+                    # Create episodes for this season
+                    create_episodes_from_season(media_item, season_data)
 
-      _ ->
-        Logger.debug("Could not parse season/episode info from filename",
-          path: path_for_log
+                    # Try to find the episode again
+                    case Mydia.Media.get_episode_by_number(
+                           media_file.media_item_id,
+                           season,
+                           episode_number
+                         ) do
+                      nil ->
+                        Logger.warning("Episode still not found after TMDB fetch",
+                          media_item_id: media_file.media_item_id,
+                          season: season,
+                          episode: episode_number
+                        )
+
+                        false
+
+                      episode ->
+                        associate_file_with_episode(media_file, episode)
+                    end
+
+                  {:error, reason} ->
+                    Logger.warning("Failed to fetch season from TMDB",
+                      media_item_id: media_file.media_item_id,
+                      season: season,
+                      reason: reason
+                    )
+
+                    false
+                end
+              else
+                Logger.warning("Media item has no TMDB ID, cannot fetch episodes",
+                  media_item_id: media_file.media_item_id
+                )
+
+                false
+              end
+
+            episode ->
+              # Episode exists, associate the file with it
+              associate_file_with_episode(media_file, episode)
+          end
+
+        _ ->
+          Logger.debug("Could not parse season/episode info from filename",
+            path: path_for_log
+          )
+
+          false
+      end
+    rescue
+      error ->
+        # Recalculate path for error logging if media_file hasn't been preloaded yet
+        media_file = Mydia.Repo.preload(media_file, :library_path, force: true)
+        error_path = Mydia.Media.MediaFile.absolute_path(media_file)
+
+        Logger.error("Exception while fixing orphaned TV file",
+          path: error_path,
+          error: Exception.message(error)
         )
 
         false
     end
-  rescue
-    error ->
-      # Recalculate path for error logging
-      error_path = media_file.relative_path || media_file.path
-
-      Logger.error("Exception while fixing orphaned TV file",
-        path: error_path,
-        error: Exception.message(error)
-      )
-
-      false
   end
 
   # Re-validates a TV file's episode association by re-parsing the filename
   defp revalidate_tv_file_association(media_file) do
     # Parse the filename to see what season/episode it claims to be
-    filename =
-      if media_file.relative_path do
-        Path.basename(media_file.relative_path)
-      else
-        Path.basename(media_file.path)
-      end
+    filename = Path.basename(media_file.relative_path)
 
     parsed = FileParser.parse(filename)
 
@@ -772,8 +754,9 @@ defmodule Mydia.Jobs.LibraryScanner do
         # Check if this matches the current association
         if media_file.episode.season_number != season or
              media_file.episode.episode_number != episode_number do
-          path_for_log =
-            media_file.relative_path || media_file.path
+          # Preload library_path association for path resolution
+          media_file = Mydia.Repo.preload(media_file, :library_path)
+          path_for_log = Mydia.Media.MediaFile.absolute_path(media_file)
 
           Logger.info("File association mismatch detected",
             path: path_for_log,
@@ -799,9 +782,7 @@ defmodule Mydia.Jobs.LibraryScanner do
               false
 
             new_episode ->
-              # Update the association
-              path_for_log = media_file.relative_path || media_file.path
-
+              # Update the association (path_for_log already defined above)
               case Library.update_media_file(media_file, %{episode_id: new_episode.id}) do
                 {:ok, _updated_file} ->
                   Logger.info("Updated file association",
@@ -833,7 +814,9 @@ defmodule Mydia.Jobs.LibraryScanner do
     end
   rescue
     error ->
-      path_for_log = media_file.relative_path || media_file.path
+      # Preload library_path association for path resolution in rescue
+      media_file = Mydia.Repo.preload(media_file, :library_path)
+      path_for_log = Mydia.Media.MediaFile.absolute_path(media_file)
 
       Logger.error("Exception while revalidating file association",
         path: path_for_log,
@@ -847,37 +830,41 @@ defmodule Mydia.Jobs.LibraryScanner do
   # For TV shows, files should have episode_id set, not media_item_id
   # So we need to clear media_item_id when setting episode_id
   defp associate_file_with_episode(media_file, episode) do
-    # Define path_for_log at top level so it's available in rescue block
-    path_for_log = media_file.relative_path || media_file.path
+    try do
+      # Preload library_path association for path resolution
+      media_file = Mydia.Repo.preload(media_file, :library_path)
+      path_for_log = Mydia.Media.MediaFile.absolute_path(media_file)
 
-    case Library.update_media_file(media_file, %{episode_id: episode.id, media_item_id: nil}) do
-      {:ok, _updated_file} ->
-        Logger.info("Associated file with episode",
-          path: path_for_log,
-          episode: "S#{episode.season_number}E#{episode.episode_number}"
-        )
+      case Library.update_media_file(media_file, %{episode_id: episode.id, media_item_id: nil}) do
+        {:ok, _updated_file} ->
+          Logger.info("Associated file with episode",
+            path: path_for_log,
+            episode: "S#{episode.season_number}E#{episode.episode_number}"
+          )
 
-        true
+          true
 
-      {:error, reason} ->
-        Logger.error("Failed to associate file with episode",
-          path: path_for_log,
-          reason: inspect(reason)
+        {:error, reason} ->
+          Logger.error("Failed to associate file with episode",
+            path: path_for_log,
+            reason: inspect(reason)
+          )
+
+          false
+      end
+    rescue
+      error ->
+        # Recalculate path for error logging
+        media_file = Mydia.Repo.preload(media_file, :library_path, force: true)
+        error_path = Mydia.Media.MediaFile.absolute_path(media_file)
+
+        Logger.error("Exception while associating file with episode",
+          path: error_path,
+          error: Exception.message(error)
         )
 
         false
     end
-  rescue
-    error ->
-      # Recalculate path for error logging
-      error_path = media_file.relative_path || media_file.path
-
-      Logger.error("Exception while associating file with episode",
-        path: error_path,
-        error: Exception.message(error)
-      )
-
-      false
   end
 
   # Creates episodes from TMDB season data
