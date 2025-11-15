@@ -26,7 +26,16 @@ defmodule MetadataRelay.MixProject do
       {:plug, "~> 1.15"},
       {:req, "~> 0.4"},
       {:jason, "~> 1.4"},
-      {:redix, "~> 1.5"}
+      {:redix, "~> 1.5"},
+      {:ecto, "~> 3.11"},
+      {:ecto_sql, "~> 3.11"},
+      {:ecto_sqlite3, "~> 0.17"},
+      {:error_tracker, "~> 0.7"},
+      {:phoenix, "~> 1.7"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:phoenix_html, "~> 4.0"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.0"}
     ]
   end
 

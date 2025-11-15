@@ -6,8 +6,6 @@ defmodule MetadataRelay.Application do
 
   @impl true
   def start(_type, _args) do
-    port = String.to_integer(System.get_env("PORT", "4000"))
-
     # Determine cache adapter based on REDIS_URL environment variable
     {cache_adapter, cache_opts} = configure_cache()
 
@@ -15,12 +13,16 @@ defmodule MetadataRelay.Application do
     Application.put_env(:metadata_relay, :cache_adapter, cache_adapter)
 
     children = [
+      # Database repository
+      MetadataRelay.Repo,
+      # PubSub for Phoenix LiveView
+      {Phoenix.PubSub, name: MetadataRelay.PubSub},
       # Cache adapter (Redis or in-memory)
       {cache_adapter, cache_opts},
       # TVDB authentication GenServer
       MetadataRelay.TVDB.Auth,
-      # HTTP server with Bandit
-      {Bandit, plug: MetadataRelay.Router, scheme: :http, port: port}
+      # Phoenix endpoint (serves both API and ErrorTracker dashboard)
+      MetadataRelayWeb.Endpoint
     ]
 
     opts = [strategy: :one_for_one, name: MetadataRelay.Supervisor]

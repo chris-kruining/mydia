@@ -3,11 +3,21 @@ import Config
 # Runtime configuration loaded at application start
 # This is where environment variables are read
 
-if config_env() == :prod do
-  # Port from environment variable
-  port = System.get_env("PORT") || "4000"
-  config :metadata_relay, port: String.to_integer(port)
+# Database configuration (all environments)
+db_path = System.get_env("SQLITE_DB_PATH") || "./metadata_relay.db"
 
+config :metadata_relay, MetadataRelay.Repo,
+  database: db_path,
+  pool_size: 5
+
+# Phoenix endpoint port configuration (serves both API and dashboard)
+port = String.to_integer(System.get_env("PORT") || "4001")
+
+config :metadata_relay, MetadataRelayWeb.Endpoint,
+  http: [port: port],
+  server: true
+
+if config_env() == :prod do
   # API keys from environment
   tmdb_api_key = System.get_env("TMDB_API_KEY")
   tvdb_api_key = System.get_env("TVDB_API_KEY")

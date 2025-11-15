@@ -14,12 +14,16 @@ services:
       - TVDB_API_KEY=${TVDB_API_KEY:-your_tvdb_key_here}
       # Redis is optional - comment out to use in-memory caching
       - REDIS_URL=redis://redis:6379
+      # SQLite database path
+      - SQLITE_DB_PATH=/app/data/metadata_relay.db
     volumes:
       # Mount source code for live reloading
       - .:/app
       # Preserve build artifacts and dependencies
       - relay_build:/app/_build
       - relay_deps:/app/deps
+      # Persist database across container restarts
+      - relay_db:/app/data
     command: mix run --no-halt
     depends_on:
       - redis
@@ -37,4 +41,5 @@ services:
 volumes:
   relay_build:
   relay_deps:
+  relay_db:
   redis_data:
