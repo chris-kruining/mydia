@@ -892,7 +892,14 @@ defmodule Mydia.Library do
   defp apply_media_file_filters(query, opts) do
     Enum.reduce(opts, query, fn
       {:media_item_id, media_item_id}, query ->
-        where(query, [f], f.media_item_id == ^media_item_id)
+        # For TV shows, files are associated through episodes, not directly
+        # So we need to find files where:
+        # 1. media_item_id matches directly (for movies/direct associations)
+        # 2. episode_id belongs to an episode of this media_item (for TV shows)
+        from(f in query,
+          left_join: e in assoc(f, :episode),
+          where: f.media_item_id == ^media_item_id or e.media_item_id == ^media_item_id
+        )
 
       {:episode_id, episode_id}, query ->
         where(query, [f], f.episode_id == ^episode_id)
