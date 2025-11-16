@@ -1,0 +1,87 @@
+defmodule Mydia.Indexers.CardigannDefinition do
+  @moduledoc """
+  Schema for Cardigann indexer definitions fetched from Prowlarr/Cardigann GitHub repository.
+
+  Stores the YAML definition and metadata for each indexer, allowing direct integration
+  without external Prowlarr/Jackett instances.
+  """
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+
+  @indexer_types ["public", "private", "semi-private"]
+
+  schema "cardigann_definitions" do
+    field :indexer_id, :string
+    field :name, :string
+    field :description, :string
+    field :language, :string
+    field :type, :string
+    field :encoding, :string
+    field :links, :map
+    field :capabilities, :map
+    field :definition, :string
+    field :schema_version, :string
+    field :enabled, :boolean, default: false
+    field :config, :map
+    field :last_synced_at, :utc_datetime
+
+    has_many :search_sessions, Mydia.Indexers.CardigannSearchSession,
+      foreign_key: :cardigann_definition_id
+
+    timestamps(type: :utc_datetime)
+  end
+
+  @doc """
+  Changeset for creating a Cardigann definition from synced data.
+  """
+  def changeset(definition, attrs) do
+    definition
+    |> cast(attrs, [
+      :indexer_id,
+      :name,
+      :description,
+      :language,
+      :type,
+      :encoding,
+      :links,
+      :capabilities,
+      :definition,
+      :schema_version,
+      :enabled,
+      :config,
+      :last_synced_at
+    ])
+    |> validate_required([
+      :indexer_id,
+      :name,
+      :type,
+      :links,
+      :capabilities,
+      :definition,
+      :schema_version
+    ])
+    |> validate_inclusion(:type, @indexer_types)
+    |> unique_constraint(:indexer_id)
+  end
+
+  @doc """
+  Changeset for enabling/disabling an indexer.
+  """
+  def toggle_changeset(definition, attrs) do
+    definition
+    |> cast(attrs, [:enabled])
+    |> validate_required([:enabled])
+  end
+
+  @doc """
+  Changeset for updating user-specific configuration (credentials, settings).
+  """
+  def config_changeset(definition, attrs) do
+    definition
+    |> cast(attrs, [:config])
+    |> validate_required([:config])
+  end
+end
