@@ -23,6 +23,8 @@ defmodule MetadataRelay.Application do
       MetadataRelay.RateLimiter,
       # TVDB authentication GenServer
       MetadataRelay.TVDB.Auth,
+      # OpenSubtitles authentication GenServer
+      MetadataRelay.OpenSubtitles.Auth,
       # Phoenix endpoint (serves both API and ErrorTracker dashboard)
       MetadataRelayWeb.Endpoint
     ]

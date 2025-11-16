@@ -7,6 +7,7 @@ defmodule MetadataRelay.Router do
 
   alias MetadataRelay.TMDB.Handler
   alias MetadataRelay.TVDB.Handler, as: TVDBHandler
+  alias MetadataRelay.OpenSubtitles.Handler, as: SubtitlesHandler
 
   plug(Plug.Logger)
   plug(Plug.Parsers, parsers: [:urlencoded, :json], json_decoder: Jason)
@@ -160,6 +161,17 @@ defmodule MetadataRelay.Router do
     handle_crash_report(conn)
   end
 
+  # Subtitle Search
+  post "/api/v1/subtitles/search" do
+    params = extract_body_params(conn)
+    handle_subtitles_request(conn, fn -> SubtitlesHandler.search(params) end)
+  end
+
+  # Subtitle Download URL
+  get "/api/v1/subtitles/download-url/:id" do
+    handle_subtitles_request(conn, fn -> SubtitlesHandler.get_download_url(id) end)
+  end
+
   # 404 catch-all
   match _ do
     send_resp(conn, 404, "Not found")
@@ -228,6 +240,12 @@ defmodule MetadataRelay.Router do
   defp extract_query_params(conn) do
     conn.query_params
     |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
+  end
+
+  defp extract_body_params(conn) do
+    conn.body_params
+    |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
+    |> Map.new()
   end
 
   defp handle_crash_report(conn) do
@@ -399,4 +417,49 @@ defmodule MetadataRelay.Router do
   end
 
   defp parse_stacktrace_entry(_), do: nil
+
+  defp handle_subtitles_request(conn, handler_fn) do
+    case handler_fn.() do
+      {:ok, body} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(body))
+
+      {:error, {:rate_limited, retry_after}} ->
+        error_response = %{
+          error: "Too many requests",
+          message: "Rate limit exceeded. Please try again later."
+        }
+
+        conn
+        |> put_resp_header("retry-after", to_string(retry_after))
+        |> put_resp_content_type("application/json")
+        |> send_resp(429, Jason.encode!(error_response))
+
+      {:error, {:http_error, status, body}} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(status, Jason.encode!(body))
+
+      {:error, {:authentication_failed, reason}} ->
+        error_response = %{
+          error: "Authentication failed",
+          message: "Failed to authenticate with OpenSubtitles: #{inspect(reason)}"
+        }
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(401, Jason.encode!(error_response))
+
+      {:error, reason} ->
+        error_response = %{
+          error: "Internal server error",
+          message: inspect(reason)
+        }
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(500, Jason.encode!(error_response))
+    end
+  end
 end
