@@ -415,9 +415,15 @@ After the admin user is created, you'll be automatically logged in and can begin
 
 ### Feature Flags
 
+> **⚠️ EXPERIMENTAL FEATURES WARNING**
+>
+> The features controlled by these flags are **very early in development** and are **unstable or may not work at all**. Do not enable these features unless you understand the risks and are comfortable with potential issues, bugs, or breaking changes. These features are opt-in and disabled by default for good reason.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ENABLE_PLAYBACK` | Enable media playback feature | `false` |
+| `ENABLE_PLAYBACK` | Enable media playback controls and HLS streaming | `false` |
+| `ENABLE_CARDIGANN` | Enable native Cardigann indexer support (hundreds of indexers without Prowlarr/Jackett) | `false` |
+| `ENABLE_SUBTITLES` | Enable subtitle download and management | `false` |
 
 ### Download Clients
 
