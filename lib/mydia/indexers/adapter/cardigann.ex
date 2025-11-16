@@ -1,0 +1,260 @@
+defmodule Mydia.Indexers.Adapter.Cardigann do
+  @moduledoc """
+  Cardigann indexer adapter for native Prowlarr/Cardigann definition support.
+
+  This adapter integrates Cardigann search engine with the existing Indexers
+  module, allowing direct execution of searches using Cardigann YAML definitions
+  without requiring external Prowlarr or Jackett instances.
+
+  ## Configuration
+
+  The adapter expects a config map with the following structure:
+
+      %{
+        type: :cardigann,
+        name: "Indexer Name",
+        indexer_id: "1337x",
+        enabled: true,
+        user_settings: %{
+          # User-provided credentials if needed for private indexers
+          username: "user",
+          password: "pass",
+          # Or API key
+          api_key: "..."
+        }
+      }
+
+  ## Example Usage
+
+      config = %{
+        type: :cardigann,
+        name: "1337x",
+        indexer_id: "1337x",
+        enabled: true
+      }
+
+      {:ok, results} = Cardigann.search(config, "Ubuntu 22.04")
+
+  ## Integration
+
+  - Fetches definition from database using `indexer_id`
+  - Parses definition using `CardigannParser`
+  - Executes search using `CardigannSearchEngine`
+  - Parses results using `CardigannResultParser`
+  - Returns normalized `SearchResult` structs
+
+  ## Authentication
+
+  For private indexers requiring authentication:
+  - Credentials stored in `user_settings` map
+  - Login handled by `CardigannSearchSession` (future implementation)
+  - Cookies managed per-user, per-indexer
+  """
+
+  @behaviour Mydia.Indexers.Adapter
+
+  alias Mydia.Indexers.{CardigannParser, CardigannSearchEngine, CardigannResultParser}
+  alias Mydia.Indexers.CardigannDefinition
+  alias Mydia.Indexers.Adapter.Error
+  alias Mydia.Repo
+
+  require Logger
+
+  @impl true
+  def test_connection(config) do
+    with {:ok, definition} <- fetch_definition(config),
+         {:ok, parsed} <- parse_definition(definition),
+         :ok <- test_indexer_reachable(parsed, config) do
+      {:ok,
+       %{
+         name: parsed.name,
+         type: parsed.type,
+         language: parsed.language,
+         indexer_id: parsed.id
+       }}
+    end
+  end
+
+  @impl true
+  def search(config, query, opts \\ []) do
+    with {:ok, definition} <- fetch_definition(config),
+         {:ok, parsed} <- parse_definition(definition),
+         {:ok, search_opts} <- build_search_opts(query, opts),
+         {:ok, user_config} <- build_user_config(config),
+         {:ok, response} <-
+           CardigannSearchEngine.execute_search(parsed, search_opts, user_config),
+         {:ok, results} <- CardigannResultParser.parse_results(parsed, response, config.name) do
+      # Apply filters from opts if present
+      filtered_results = apply_search_filters(results, opts)
+      {:ok, filtered_results}
+    else
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        Logger.error("Cardigann search failed: #{inspect(reason)}")
+        {:error, Error.search_failed("Search failed: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
+  def get_capabilities(config) do
+    with {:ok, definition} <- fetch_definition(config),
+         {:ok, parsed} <- parse_definition(definition) do
+      capabilities = build_capabilities_response(parsed)
+      {:ok, capabilities}
+    end
+  end
+
+  ## Private Functions
+
+  defp fetch_definition(%{indexer_id: indexer_id}) do
+    case Repo.get_by(CardigannDefinition, indexer_id: indexer_id) do
+      nil ->
+        {:error, Error.invalid_config("Cardigann definition not found: #{indexer_id}")}
+
+      definition ->
+        {:ok, definition}
+    end
+  end
+
+  defp fetch_definition(_config) do
+    {:error, Error.invalid_config("Missing indexer_id in config")}
+  end
+
+  defp parse_definition(%CardigannDefinition{definition: yaml_string}) do
+    case CardigannParser.parse_definition(yaml_string) do
+      {:ok, parsed} ->
+        {:ok, parsed}
+
+      {:error, reason} ->
+        Logger.error("Failed to parse Cardigann definition: #{inspect(reason)}")
+        {:error, Error.search_failed("Invalid definition: #{inspect(reason)}")}
+    end
+  end
+
+  defp test_indexer_reachable(parsed, _config) do
+    # Build a simple test URL to check if the indexer is reachable
+    case parsed.links do
+      [base_url | _] ->
+        # Try to fetch the base URL to verify connectivity
+        case Req.get(base_url, receive_timeout: 10_000, redirect: false) do
+          {:ok, %Req.Response{status: status}} when status in 200..399 ->
+            :ok
+
+          {:ok, %Req.Response{status: status}} ->
+            Logger.warning("Indexer returned HTTP #{status}, but may still be functional")
+            :ok
+
+          {:error, %Mint.TransportError{reason: reason}} ->
+            {:error, Error.connection_failed("Connection failed: #{inspect(reason)}")}
+
+          {:error, reason} ->
+            {:error, Error.connection_failed("Request failed: #{inspect(reason)}")}
+        end
+
+      [] ->
+        {:error, Error.invalid_config("No base URL configured in definition")}
+    end
+  end
+
+  defp build_search_opts(query, opts) do
+    search_opts = [
+      query: query,
+      categories: Keyword.get(opts, :categories, []),
+      season: Keyword.get(opts, :season),
+      episode: Keyword.get(opts, :episode),
+      imdb_id: Keyword.get(opts, :imdb_id),
+      tmdb_id: Keyword.get(opts, :tmdb_id)
+    ]
+
+    {:ok, search_opts}
+  end
+
+  defp build_user_config(config) do
+    user_settings = Map.get(config, :user_settings, %{})
+
+    user_config = %{
+      username: Map.get(user_settings, :username),
+      password: Map.get(user_settings, :password),
+      api_key: Map.get(user_settings, :api_key),
+      cookies: Map.get(user_settings, :cookies, [])
+    }
+
+    {:ok, user_config}
+  end
+
+  defp apply_search_filters(results, opts) do
+    results
+    |> filter_by_min_seeders(Keyword.get(opts, :min_seeders, 0))
+    |> filter_by_min_size(Keyword.get(opts, :min_size))
+    |> filter_by_max_size(Keyword.get(opts, :max_size))
+    |> limit_results(Keyword.get(opts, :limit))
+  end
+
+  defp filter_by_min_seeders(results, min_seeders) when min_seeders > 0 do
+    Enum.filter(results, fn result -> result.seeders >= min_seeders end)
+  end
+
+  defp filter_by_min_seeders(results, _), do: results
+
+  defp filter_by_min_size(results, nil), do: results
+
+  defp filter_by_min_size(results, min_size) do
+    Enum.filter(results, fn result -> result.size >= min_size end)
+  end
+
+  defp filter_by_max_size(results, nil), do: results
+
+  defp filter_by_max_size(results, max_size) do
+    Enum.filter(results, fn result -> result.size <= max_size end)
+  end
+
+  defp limit_results(results, nil), do: results
+  defp limit_results(results, limit), do: Enum.take(results, limit)
+
+  defp build_capabilities_response(parsed) do
+    # Extract categories from the definition
+    categories = extract_categories(parsed.capabilities)
+
+    # Build capabilities map compatible with Adapter behaviour
+    %{
+      searching: %{
+        search: %{available: true, supported_params: ["q"]},
+        tv_search: %{
+          available: has_tv_search_mode?(parsed),
+          supported_params: ["q", "season", "ep"]
+        },
+        movie_search: %{
+          available: has_movie_search_mode?(parsed),
+          supported_params: ["q", "imdbid", "tmdbid"]
+        }
+      },
+      categories: categories
+    }
+  end
+
+  defp extract_categories(%{categorymappings: mappings}) when is_list(mappings) do
+    Enum.map(mappings, fn mapping ->
+      %{
+        id: Map.get(mapping, "id"),
+        name: Map.get(mapping, "name") || Map.get(mapping, "desc", "Unknown")
+      }
+    end)
+    |> Enum.filter(fn cat -> cat.id != nil end)
+  end
+
+  defp extract_categories(_), do: []
+
+  defp has_tv_search_mode?(%{capabilities: %{modes: modes}}) when is_map(modes) do
+    Map.has_key?(modes, "tv-search") || Map.has_key?(modes, "tvsearch")
+  end
+
+  defp has_tv_search_mode?(_), do: false
+
+  defp has_movie_search_mode?(%{capabilities: %{modes: modes}}) when is_map(modes) do
+    Map.has_key?(modes, "movie-search") || Map.has_key?(modes, "moviesearch")
+  end
+
+  defp has_movie_search_mode?(_), do: false
+end

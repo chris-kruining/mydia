@@ -37,15 +37,17 @@ defmodule Mydia.Indexers do
   ## Registered Adapters
 
   Currently supported adapters:
-    - `:prowlarr` - Prowlarr indexer aggregator (when implemented)
-    - `:jackett` - Jackett indexer proxy (when implemented)
+    - `:prowlarr` - Prowlarr indexer aggregator
+    - `:jackett` - Jackett indexer proxy
+    - `:cardigann` - Native Cardigann definition support
   """
   def register_adapters do
     Logger.info("Registering indexer adapters...")
 
-    # Register adapters as they are implemented
+    # Register adapters
     Adapter.Registry.register(:prowlarr, Mydia.Indexers.Adapter.Prowlarr)
     Adapter.Registry.register(:jackett, Mydia.Indexers.Adapter.Jackett)
+    Adapter.Registry.register(:cardigann, Mydia.Indexers.Adapter.Cardigann)
 
     Logger.info("Indexer adapter registration complete")
     :ok
