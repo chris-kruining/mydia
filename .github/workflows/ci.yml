@@ -54,6 +54,9 @@ jobs:
       - name: Run Credo static analysis
         run: mix credo --mute-exit-status
 
+      - name: Setup test database
+        run: mix ecto.create && mix ecto.migrate
+
       - name: Run tests
         run: mix test
 
