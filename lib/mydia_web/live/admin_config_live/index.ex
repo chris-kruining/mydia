@@ -57,7 +57,11 @@ defmodule MydiaWeb.AdminConfigLive.Index do
 
         if changeset.valid? do
           validated_data = Ecto.Changeset.apply_changes(changeset)
-          upsert_config_setting(validated_data)
+          # Add updated_by_id for audit trail
+          validated_data_with_user =
+            Map.put(validated_data, :updated_by_id, socket.assigns.current_user.id)
+
+          upsert_config_setting(validated_data_with_user)
         else
           {:error, changeset}
         end
@@ -81,6 +85,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
 
         MydiaLogger.log_error(:liveview, "Failed to update setting",
           error: error,
+          error_details: inspect(error, pretty: true),
           operation: :update_setting,
           category: category,
           setting_key: setting_key,
@@ -115,8 +120,11 @@ defmodule MydiaWeb.AdminConfigLive.Index do
 
     if changeset.valid? do
       validated_data = Ecto.Changeset.apply_changes(changeset)
+      # Add updated_by_id for audit trail
+      validated_data_with_user =
+        Map.put(validated_data, :updated_by_id, socket.assigns.current_user.id)
 
-      case upsert_config_setting(validated_data) do
+      case upsert_config_setting(validated_data_with_user) do
         {:ok, _setting} ->
           {:noreply,
            socket
@@ -125,6 +133,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         {:error, changeset} ->
           MydiaLogger.log_error(:liveview, "Failed to toggle setting",
             error: changeset,
+            error_details: inspect(changeset, pretty: true),
+            changeset_errors: changeset.errors,
             operation: :update_setting,
             category: category,
             setting_key: key,
@@ -1167,12 +1177,19 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   defp validate_config_setting(attrs) do
     types = %{
       key: :string,
-      value: :string,
-      category: :atom
+      value: :string
     }
 
-    {%{}, types}
-    |> Ecto.Changeset.cast(attrs, Map.keys(types))
+    # Category is already an atom from category_string_to_atom/1,
+    # so we don't cast it - we add it directly to avoid :atom.cast/1 error
+    changeset =
+      {%{}, types}
+      |> Ecto.Changeset.cast(attrs, Map.keys(types))
+
+    # Manually add category to changes since it's already an atom
+    changeset = %{changeset | changes: Map.put(changeset.changes, :category, attrs.category)}
+
+    changeset
     |> Ecto.Changeset.validate_required([:key, :value, :category])
   end
 
@@ -1193,12 +1210,33 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     # attrs is now a map from apply_changes, convert to map with atom keys if needed
     attrs_map = if is_struct(attrs), do: Map.from_struct(attrs), else: attrs
 
-    case Settings.get_config_setting_by_key(attrs_map.key) do
+    # Ensure we're accessing the key correctly (might be atom or string key)
+    key = Map.get(attrs_map, :key) || Map.get(attrs_map, "key")
+
+    # Convert atom keys to string keys for Ecto.Changeset.cast/3
+    # Keep category as atom since ConfigSetting schema uses Ecto.Enum which handles atoms
+    string_attrs = %{
+      "key" => Map.get(attrs_map, :key),
+      "value" => Map.get(attrs_map, :value),
+      "category" => Map.get(attrs_map, :category),
+      "updated_by_id" => Map.get(attrs_map, :updated_by_id)
+    }
+
+    # Debug logging
+    require Logger
+
+    Logger.debug("Upserting config setting: key=#{inspect(key)}, attrs=#{inspect(string_attrs)}")
+
+    case Settings.get_config_setting_by_key(key) do
       nil ->
-        Settings.create_config_setting(attrs_map)
+        result = Settings.create_config_setting(string_attrs)
+        Logger.debug("Create result: #{inspect(result)}")
+        result
 
       existing ->
-        Settings.update_config_setting(existing, attrs_map)
+        result = Settings.update_config_setting(existing, string_attrs)
+        Logger.debug("Update result: #{inspect(result)}")
+        result
     end
   end
 

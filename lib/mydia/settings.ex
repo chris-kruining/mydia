@@ -1065,6 +1065,27 @@ defmodule Mydia.Settings do
 
   ## Runtime ID Helpers
 
+  @doc """
+  Checks if a configuration struct is from runtime config (environment variables)
+  rather than the database.
+
+  Runtime configs have IDs that start with "runtime::" and cannot be updated
+  via the normal update functions as they are not loaded from the database.
+
+  ## Examples
+
+      iex> runtime_config?(client)
+      true
+
+      iex> database_config?(client)
+      false
+  """
+  def runtime_config?(%{id: id}) when is_binary(id) do
+    String.starts_with?(id, "runtime::")
+  end
+
+  def runtime_config?(_), do: false
+
   # Builds a stable runtime identifier for a runtime config item.
   #
   # Format: "runtime::{type}::{key}"

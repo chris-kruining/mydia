@@ -338,6 +338,41 @@ defmodule MydiaWeb.AdminConfigLiveTest do
     end
   end
 
+  describe "General Settings" do
+    setup %{conn: conn, token: token} do
+      # Start the Indexers.Health GenServer to initialize ETS tables
+      start_supervised!(Mydia.Indexers.Health)
+
+      conn =
+        conn
+        |> init_test_session(%{})
+        |> put_session(:guardian_default_token, token)
+        |> put_req_header("authorization", "Bearer #{token}")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/config?tab=general")
+      %{conn: conn, view: view}
+    end
+
+    test "toggles authentication settings without :atom.cast/1 error", %{view: view} do
+      # This test verifies the fix for task-228
+      # Previously, toggling auth.local_enabled would cause :atom.cast/1 error
+      result =
+        view
+        |> element("#settings-form-Authentication")
+        |> render_change(%{
+          "category" => "Authentication",
+          "settings" => %{
+            "auth.local_enabled" => "true"
+          }
+        })
+
+      # Should not crash with UndefinedFunctionError
+      assert result
+      # Verify the form still renders without error
+      assert has_element?(view, "#settings-form-Authentication")
+    end
+  end
+
   describe "Library Paths" do
     setup %{conn: conn, token: token} do
       # Start the Indexers.Health GenServer to initialize ETS tables
