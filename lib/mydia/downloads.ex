@@ -40,6 +40,33 @@ defmodule Mydia.Downloads do
   end
 
   @doc """
+  Tests the connection to a download client.
+
+  Accepts either a DownloadClientConfig struct or a config map with the client
+  connection details. Routes to the appropriate adapter based on the client type.
+
+  ## Examples
+
+      iex> config = %{type: :qbittorrent, host: "localhost", port: 8080, username: "admin", password: "pass"}
+      iex> Mydia.Downloads.test_connection(config)
+      {:ok, %ClientInfo{version: "v4.5.0", api_version: "2.8.19"}}
+
+      iex> config = Settings.get_download_client_config!(id)
+      iex> Mydia.Downloads.test_connection(config)
+      {:ok, %ClientInfo{...}}
+  """
+  def test_connection(%Settings.DownloadClientConfig{} = config) do
+    adapter_config = config_to_map(config)
+    test_connection(adapter_config)
+  end
+
+  def test_connection(%{type: type} = config) when is_atom(type) do
+    with {:ok, adapter} <- Registry.get_adapter(type) do
+      adapter.test_connection(config)
+    end
+  end
+
+  @doc """
   Returns the list of downloads from the database.
 
   This returns minimal download records used for associations only.
