@@ -152,6 +152,39 @@ defmodule MydiaWeb.AdminConfigLive.IndexerLibrary do
      |> put_flash(:info, "Sync triggered - this may take a few minutes")}
   end
 
+  @impl true
+  def handle_event("test_connection", %{"id" => id}, socket) do
+    # Test connection for a specific indexer
+    case Indexers.test_cardigann_connection(id) do
+      {:ok, result} ->
+        flash_message =
+          if result.success do
+            "Connection successful (#{result.response_time_ms}ms)"
+          else
+            "Connection failed: #{result.error || "Unknown error"}"
+          end
+
+        flash_type = if result.success, do: :info, else: :error
+
+        {:noreply,
+         socket
+         |> put_flash(flash_type, flash_message)
+         |> load_indexers()}
+
+      {:error, reason} ->
+        MydiaLogger.log_error(:liveview, "Failed to test connection",
+          error: reason,
+          operation: :test_cardigann_connection,
+          definition_id: id,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> put_flash(:error, "Failed to test connection: #{inspect(reason)}")}
+    end
+  end
+
   ## Private Functions
 
   defp load_indexers(socket) do
@@ -250,4 +283,41 @@ defmodule MydiaWeb.AdminConfigLive.IndexerLibrary do
        do: true
 
   defp needs_configuration?(_), do: false
+
+  defp health_status_badge_class("healthy"), do: "badge-success"
+  defp health_status_badge_class("degraded"), do: "badge-warning"
+  defp health_status_badge_class("unhealthy"), do: "badge-error"
+  defp health_status_badge_class("unknown"), do: "badge-ghost"
+  defp health_status_badge_class(_), do: "badge-ghost"
+
+  defp health_status_label("healthy"), do: "Healthy"
+  defp health_status_label("degraded"), do: "Degraded"
+  defp health_status_label("unhealthy"), do: "Unhealthy"
+  defp health_status_label("unknown"), do: "Unknown"
+  defp health_status_label(nil), do: "Unknown"
+  defp health_status_label(_), do: "Unknown"
+
+  defp format_relative_time(nil), do: "never"
+
+  defp format_relative_time(datetime) do
+    now = DateTime.utc_now()
+    diff_seconds = DateTime.diff(now, datetime, :second)
+
+    cond do
+      diff_seconds < 60 ->
+        "#{diff_seconds}s ago"
+
+      diff_seconds < 3600 ->
+        minutes = div(diff_seconds, 60)
+        "#{minutes}m ago"
+
+      diff_seconds < 86400 ->
+        hours = div(diff_seconds, 3600)
+        "#{hours}h ago"
+
+      true ->
+        days = div(diff_seconds, 86400)
+        "#{days}d ago"
+    end
+  end
 end

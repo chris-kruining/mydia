@@ -313,7 +313,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      socket
      |> assign(:show_download_client_modal, true)
      |> assign(:download_client_form, to_form(changeset))
-     |> assign(:download_client_mode, :new)}
+     |> assign(:download_client_mode, :new)
+     |> assign(:testing_download_client_connection, false)}
   end
 
   @impl true
@@ -326,7 +327,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:show_download_client_modal, true)
      |> assign(:download_client_form, to_form(changeset))
      |> assign(:download_client_mode, :edit)
-     |> assign(:editing_download_client, client)}
+     |> assign(:editing_download_client, client)
+     |> assign(:testing_download_client_connection, false)}
   end
 
   @impl true
@@ -463,6 +465,97 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
+  @impl true
+  def handle_event("test_download_client_connection", _params, socket) do
+    # Extract form params from the current changeset
+    changeset = socket.assigns.download_client_form.source
+
+    # Get the changeset data (which includes user input)
+    params = Ecto.Changeset.apply_changes(changeset)
+
+    # Convert string type to atom if needed
+    type =
+      case params.type do
+        type when is_atom(type) -> type
+        type when is_binary(type) -> String.to_existing_atom(type)
+      end
+
+    # Build config map for test_connection
+    test_config = %{
+      type: type,
+      host: params.host,
+      port: params.port,
+      use_ssl: params.use_ssl || false,
+      username: params.username,
+      password: params.password,
+      api_key: params.api_key,
+      url_base: params.url_base,
+      options: params.connection_settings || %{}
+    }
+
+    # Set loading state
+    socket = assign(socket, :testing_download_client_connection, true)
+
+    # Test the connection with a timeout
+    task =
+      Task.async(fn ->
+        test_client_connection(test_config)
+      end)
+
+    case Task.yield(task, 10_000) || Task.shutdown(task) do
+      {:ok, {:ok, info}} ->
+        # Extract version or other info from response
+        version_info =
+          cond do
+            Map.has_key?(info, :version) ->
+              "Version: #{info.version}"
+
+            Map.has_key?(info, :rpc_version) ->
+              "RPC Version: #{info.rpc_version}"
+
+            true ->
+              "Connected"
+          end
+
+        {:noreply,
+         socket
+         |> assign(:testing_download_client_connection, false)
+         |> put_flash(:info, "Connection successful! #{version_info}")}
+
+      {:ok, {:error, error}} ->
+        MydiaLogger.log_warning(:liveview, "Download client connection test failed",
+          operation: :test_download_client_connection,
+          error: error,
+          client_type: type,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg =
+          case error do
+            %{message: msg} -> msg
+            _ -> MydiaLogger.extract_error_message(error)
+          end
+
+        {:noreply,
+         socket
+         |> assign(:testing_download_client_connection, false)
+         |> put_flash(:error, "Connection failed: #{error_msg}")}
+
+      nil ->
+        # Task timed out
+        MydiaLogger.log_warning(:liveview, "Download client connection test timed out",
+          operation: :test_download_client_connection,
+          client_type: type,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> assign(:testing_download_client_connection, false)
+         |> put_flash(:error, "Connection test timed out after 10 seconds")}
+    end
+  end
+
   ## Indexer Events
 
   @impl true
@@ -473,7 +566,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      socket
      |> assign(:show_indexer_modal, true)
      |> assign(:indexer_form, to_form(changeset))
-     |> assign(:indexer_mode, :new)}
+     |> assign(:indexer_mode, :new)
+     |> assign(:testing_indexer_connection, false)}
   end
 
   @impl true
@@ -486,7 +580,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:show_indexer_modal, true)
      |> assign(:indexer_form, to_form(changeset))
      |> assign(:indexer_mode, :edit)
-     |> assign(:editing_indexer, indexer)}
+     |> assign(:editing_indexer, indexer)
+     |> assign(:testing_indexer_connection, false)}
   end
 
   @impl true
@@ -560,6 +655,81 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_event("close_indexer_modal", _params, socket) do
     {:noreply, assign(socket, :show_indexer_modal, false)}
+  end
+
+  @impl true
+  def handle_event("test_indexer_connection", _params, socket) do
+    # Extract form params from the current changeset
+    changeset = socket.assigns.indexer_form.source
+
+    # Get the changeset data (which includes user input)
+    params = Ecto.Changeset.apply_changes(changeset)
+
+    # Convert string type to atom if needed
+    type =
+      case params.type do
+        type when is_atom(type) -> type
+        type when is_binary(type) -> String.to_existing_atom(type)
+      end
+
+    # Build config map for test_connection
+    test_config = %{
+      type: type,
+      base_url: params.base_url,
+      api_key: params.api_key
+    }
+
+    # Set loading state
+    socket = assign(socket, :testing_indexer_connection, true)
+
+    # Test the connection with a timeout
+    task =
+      Task.async(fn ->
+        Mydia.Indexers.test_connection(test_config)
+      end)
+
+    case Task.yield(task, 10_000) || Task.shutdown(task) do
+      {:ok, {:ok, info}} ->
+        # Extract version or other info from response
+        version = Map.get(info, :version, "unknown")
+
+        {:noreply,
+         socket
+         |> assign(:testing_indexer_connection, false)
+         |> put_flash(:info, "Connection successful! Version: #{version}")}
+
+      {:ok, {:error, error}} ->
+        MydiaLogger.log_warning(:liveview, "Indexer connection test failed",
+          operation: :test_indexer_connection,
+          error: error,
+          indexer_type: type,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg =
+          case error do
+            %{message: msg} -> msg
+            _ -> MydiaLogger.extract_error_message(error)
+          end
+
+        {:noreply,
+         socket
+         |> assign(:testing_indexer_connection, false)
+         |> put_flash(:error, "Connection failed: #{error_msg}")}
+
+      nil ->
+        # Task timed out
+        MydiaLogger.log_warning(:liveview, "Indexer connection test timed out",
+          operation: :test_indexer_connection,
+          indexer_type: type,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> assign(:testing_indexer_connection, false)
+         |> put_flash(:error, "Connection test timed out after 10 seconds")}
+    end
   end
 
   @impl true

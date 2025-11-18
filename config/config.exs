@@ -248,7 +248,9 @@ config :mydia, Oban,
        # Clean up old events every Sunday at 2 AM
        {"0 2 * * 0", Mydia.Jobs.EventCleanup},
        # Sync Cardigann definitions daily at 3 AM
-       {"0 3 * * *", Mydia.Jobs.DefinitionSync}
+       {"0 3 * * *", Mydia.Jobs.DefinitionSync},
+       # Check Cardigann indexer health every hour
+       {"0 * * * *", Mydia.Jobs.CardigannHealthCheck}
      ]}
   ]
 

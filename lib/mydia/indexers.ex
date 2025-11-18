@@ -466,13 +466,29 @@ defmodule Mydia.Indexers do
   ## Examples
 
       iex> test_cardigann_definition(definition)
-      {:ok, %{status: :healthy}}
+      {:ok, %{success: true, status: "healthy", ...}}
   """
-  def test_cardigann_definition(%CardigannDefinition{} = _definition) do
-    # For now, we'll use the Cardigann adapter's test functionality
-    # This will need to be implemented to parse the definition and test the connection
-    # TODO: Implement actual testing logic in the Cardigann adapter
-    {:ok, %{status: :not_implemented}}
+  def test_cardigann_definition(%CardigannDefinition{} = definition) do
+    alias Mydia.Indexers.CardigannHealthCheck
+
+    CardigannHealthCheck.execute_health_check(definition)
+  end
+
+  @doc """
+  Tests connection to a Cardigann indexer by ID.
+
+  Performs a test search to verify connectivity, authentication, and response.
+  Updates the health status in the database.
+
+  ## Examples
+
+      iex> test_cardigann_connection("abc-123")
+      {:ok, %{success: true, status: "healthy", ...}}
+  """
+  def test_cardigann_connection(definition_id) when is_binary(definition_id) do
+    alias Mydia.Indexers.CardigannHealthCheck
+
+    CardigannHealthCheck.test_connection(definition_id)
   end
 
   @doc """

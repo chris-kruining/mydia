@@ -12,6 +12,7 @@ defmodule Mydia.Indexers.CardigannDefinition do
   @foreign_key_type :binary_id
 
   @indexer_types ["public", "private", "semi-private"]
+  @health_statuses ["healthy", "degraded", "unhealthy", "unknown"]
 
   schema "cardigann_definitions" do
     field :indexer_id, :string
@@ -27,6 +28,12 @@ defmodule Mydia.Indexers.CardigannDefinition do
     field :enabled, :boolean, default: false
     field :config, :map
     field :last_synced_at, :utc_datetime
+
+    # Health check fields
+    field :health_status, :string, default: "unknown"
+    field :last_health_check_at, :utc_datetime
+    field :last_successful_query_at, :utc_datetime
+    field :consecutive_failures, :integer, default: 0
 
     has_many :search_sessions, Mydia.Indexers.CardigannSearchSession,
       foreign_key: :cardigann_definition_id
@@ -83,5 +90,19 @@ defmodule Mydia.Indexers.CardigannDefinition do
     definition
     |> cast(attrs, [:config])
     |> validate_required([:config])
+  end
+
+  @doc """
+  Changeset for updating health check status and timestamps.
+  """
+  def health_check_changeset(definition, attrs) do
+    definition
+    |> cast(attrs, [
+      :health_status,
+      :last_health_check_at,
+      :last_successful_query_at,
+      :consecutive_failures
+    ])
+    |> validate_inclusion(:health_status, @health_statuses)
   end
 end
