@@ -567,7 +567,8 @@ All pull requests and commits to the main branch automatically run:
 - ✓ Code compilation with warnings as errors
 - ✓ Code formatting checks
 - ✓ Static analysis with Credo
-- ✓ Full test suite
+- ✓ Full test suite (ExUnit + LiveView tests)
+- ✓ End-to-end tests (Playwright)
 - ✓ Docker build verification
 
 Run these checks locally before committing:
@@ -575,6 +576,56 @@ Run these checks locally before committing:
 ```bash
 mix precommit
 ```
+
+### End-to-End Testing
+
+Mydia uses Playwright for comprehensive browser-based testing of complete user workflows, JavaScript interactions, and real-time features.
+
+**Quick Start:**
+
+```bash
+# Install dependencies
+cd assets
+npm install
+
+# Run E2E tests (Chromium only, fast)
+npm run test:e2e
+
+# Run with UI for debugging
+npm run test:e2e:ui
+
+# Run in headed mode (see browser)
+npm run test:e2e -- --headed
+```
+
+**What's Tested:**
+- ✓ Authentication flows (local + OIDC)
+- ✓ LiveView real-time updates
+- ✓ JavaScript/Alpine.js interactions
+- ✓ Complete user workflows
+- ✓ Cross-browser compatibility
+
+**CI Integration:**
+
+E2E tests run automatically in GitHub Actions on every PR and push. Tests use a Docker Compose environment with mock services (OAuth2, Prowlarr, qBittorrent) for fast, reliable testing.
+
+**Writing Tests:**
+
+```typescript
+import { test, expect } from '@playwright/test';
+import { loginAsAdmin } from '../helpers/auth';
+import { assertFlashMessage } from '../helpers/liveview';
+
+test('admin can update settings', async ({ page }) => {
+  await loginAsAdmin(page);
+  await page.goto('/admin/settings');
+  await page.fill('input[name="setting"]', 'value');
+  await page.click('button[type="submit"]');
+  await assertFlashMessage(page, 'success', 'Settings saved');
+});
+```
+
+**Full Documentation:** See [docs/testing/e2e.md](docs/testing/e2e.md) for complete guide on running, writing, and debugging E2E tests.
 
 ### Git Hooks
 

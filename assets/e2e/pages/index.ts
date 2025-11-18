@@ -3,3 +3,6 @@
  */
 
 export * from './LoginPage';
+export * from './SearchPage';
+export * from './MediaLibraryPage';
+export * from './AdminConfigPage';

@@ -4,3 +4,4 @@
 
 export * from './auth';
 export * from './liveview';
+export * from './database';
