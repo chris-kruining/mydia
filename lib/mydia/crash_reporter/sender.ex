@@ -71,9 +71,25 @@ defmodule Mydia.CrashReporter.Sender do
         {:error, :service_unavailable}
 
       {:ok, %{status: status, body: body}} ->
-        # Other error
-        Logger.error("Crash report failed with unexpected status",
+        # Other error - provide detailed context in the message
+        body_summary =
+          case body do
+            %{} = map when map_size(map) > 0 ->
+              # Extract error message if available
+              Map.get(map, "error") || Map.get(map, "message") || inspect(map)
+
+            binary when is_binary(binary) and byte_size(binary) > 0 ->
+              # Show first 200 chars of response
+              String.slice(binary, 0, 200)
+
+            _ ->
+              "empty or unknown response"
+          end
+
+        Logger.error(
+          "Crash report failed with unexpected HTTP #{status} status: #{body_summary}",
           status: status,
+          url: url,
           body: inspect(body)
         )
 
