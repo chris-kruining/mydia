@@ -315,6 +315,17 @@ config :error_tracker,
   # Enable in production and development, but not test
   enabled: config_env() != :test
 
+# Configure crash reporter retry behavior
+config :mydia, Mydia.CrashReporter.Queue,
+  # Initial retry delay: 1 minute
+  initial_retry_delay: 60_000,
+  # Maximum retry delay: 8 minutes (exponential backoff caps here)
+  max_retry_delay: 480_000,
+  # Maximum retry attempts before giving up
+  max_retries: 10,
+  # Maximum total retry duration: 24 hours
+  max_retry_duration: 24 * 60 * 60
+
 # Configure Logger backends for crash reporting
 # The crash reporter backend will automatically capture errors when enabled
 config :logger,

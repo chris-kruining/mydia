@@ -8,9 +8,34 @@ defmodule Mydia.CrashReporter.Queue do
 
   ## Features
   - In-memory queue with ETS persistence
-  - Automatic retry with exponential backoff
-  - Configurable max retries
-  - Background worker for processing queue
+  - Automatic retry with configurable exponential backoff
+  - Configurable max retries and retry duration
+  - Background worker for processing queue every 30 seconds
+  - Graceful handling of both network and server errors
+
+  ## Configuration
+
+  Retry behavior can be configured in config.exs:
+
+      config :mydia, Mydia.CrashReporter.Queue,
+        initial_retry_delay: 60_000,        # 1 minute (in milliseconds)
+        max_retry_delay: 480_000,           # 8 minutes (in milliseconds)
+        max_retries: 10,                    # Maximum retry attempts
+        max_retry_duration: 24 * 60 * 60   # 24 hours (in seconds)
+
+  ## Retry Strategy
+
+  The queue uses exponential backoff with the following behavior:
+  - Initial delay: 1 minute (configurable)
+  - Delay doubles after each retry: 1min, 2min, 4min, 8min, 8min, ...
+  - Max delay cap: 8 minutes (configurable)
+  - Reports are deleted only after:
+    - Exceeding max retries (default: 10 attempts), OR
+    - Exceeding max retry duration (default: 24 hours)
+  - Successful delivery immediately stops further retries
+
+  This strategy ensures crash reports survive temporary network issues and server
+  outages while preventing indefinite retention of undeliverable reports.
   """
 
   use GenServer
@@ -19,9 +44,6 @@ defmodule Mydia.CrashReporter.Queue do
   alias Mydia.CrashReporter.Sender
 
   @table_name :crash_report_queue
-  @max_retries 3
-  @initial_retry_delay 5_000
-  @max_retry_delay 60_000
 
   # Client API
 
@@ -98,12 +120,15 @@ defmodule Mydia.CrashReporter.Queue do
     report_id = generate_id()
 
     # Store in ETS with metadata
+    now = System.monotonic_time(:second)
+
     entry = %{
       id: report_id,
       report: report,
       retries: 0,
-      enqueued_at: System.monotonic_time(:second),
-      last_attempt_at: nil
+      enqueued_at: now,
+      last_attempt_at: nil,
+      next_retry_at: now
     }
 
     :ets.insert(@table_name, {report_id, entry})
@@ -168,29 +193,45 @@ defmodule Mydia.CrashReporter.Queue do
           Logger.debug("Crash report #{entry.id} sent successfully")
 
         {:error, reason} ->
-          # Failed - increment retry count
-          updated_entry = %{
+          # Failed - increment retry count and schedule next retry
+          now = System.monotonic_time(:second)
+          next_retry = entry.retries + 1
+          delay_seconds = div(retry_delay(next_retry), 1000)
+
+          # Use Map.put to support old entries without next_retry_at
+          updated_entry =
             entry
-            | retries: entry.retries + 1,
-              last_attempt_at: System.monotonic_time(:second)
-          }
+            |> Map.put(:retries, next_retry)
+            |> Map.put(:last_attempt_at, now)
+            |> Map.put(:next_retry_at, now + delay_seconds)
 
-          if updated_entry.retries >= @max_retries do
-            # Max retries exceeded - remove from queue
-            :ets.delete(@table_name, entry.id)
+          max_retries = get_config(:max_retries)
+          max_duration = get_config(:max_retry_duration)
 
-            Logger.warning(
-              "Crash report #{entry.id} failed after #{@max_retries} attempts, discarding",
-              error: inspect(reason)
-            )
-          else
-            # Update entry with new retry count
-            :ets.insert(@table_name, {entry.id, updated_entry})
+          cond do
+            updated_entry.retries >= max_retries ->
+              # Max retries exceeded - remove from queue
+              :ets.delete(@table_name, entry.id)
 
-            Logger.debug(
-              "Crash report #{entry.id} failed, will retry (#{updated_entry.retries}/#{@max_retries})",
-              error: inspect(reason)
-            )
+              Logger.warning(
+                "Crash report #{entry.id} failed after #{max_retries} attempts, discarding. Reason: #{inspect(reason)}"
+              )
+
+            now - entry.enqueued_at >= max_duration ->
+              # Max retry duration exceeded - remove from queue
+              :ets.delete(@table_name, entry.id)
+
+              Logger.warning(
+                "Crash report #{entry.id} exceeded max retry duration (#{max_duration}s), discarding. Reason: #{inspect(reason)}"
+              )
+
+            true ->
+              # Update entry with new retry count and schedule
+              :ets.insert(@table_name, {entry.id, updated_entry})
+
+              Logger.debug(
+                "Crash report #{entry.id} failed, will retry in #{delay_seconds}s (#{updated_entry.retries}/#{max_retries}). Reason: #{inspect(reason)}"
+              )
           end
       end
     end
@@ -199,27 +240,45 @@ defmodule Mydia.CrashReporter.Queue do
   end
 
   defp should_retry?(entry) do
-    # Don't retry if max retries exceeded
-    if entry.retries >= @max_retries do
-      false
-    else
-      # Check if enough time has passed since last attempt
-      if entry.last_attempt_at do
-        delay = retry_delay(entry.retries)
-        now = System.monotonic_time(:second)
-        now - entry.last_attempt_at >= div(delay, 1000)
-      else
-        # Never attempted - should retry
-        true
-      end
+    max_retries = get_config(:max_retries)
+    max_duration = get_config(:max_retry_duration)
+    now = System.monotonic_time(:second)
+
+    cond do
+      # Don't retry if max retries exceeded
+      entry.retries >= max_retries ->
+        false
+
+      # Don't retry if max duration exceeded
+      now - entry.enqueued_at >= max_duration ->
+        false
+
+      # Check if it's time for the next retry
+      true ->
+        # Handle both old entries (without next_retry_at) and new entries (with next_retry_at)
+        next_retry_at = Map.get(entry, :next_retry_at, entry.enqueued_at)
+        now >= next_retry_at
     end
   end
 
   defp retry_delay(retries) do
     # Exponential backoff with max delay
-    delay = @initial_retry_delay * :math.pow(2, retries)
-    min(trunc(delay), @max_retry_delay)
+    initial_delay = get_config(:initial_retry_delay)
+    max_delay = get_config(:max_retry_delay)
+
+    delay = initial_delay * :math.pow(2, retries)
+    min(trunc(delay), max_delay)
   end
+
+  defp get_config(key) do
+    Application.get_env(:mydia, __MODULE__, [])
+    |> Keyword.get(key, default_config(key))
+  end
+
+  defp default_config(:initial_retry_delay), do: 60_000
+  defp default_config(:max_retry_delay), do: 480_000
+  defp default_config(:max_retries), do: 10
+  defp default_config(:max_retry_duration), do: 24 * 60 * 60
 
   defp schedule_process_queue do
     # Process queue every 30 seconds
