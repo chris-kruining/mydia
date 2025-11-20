@@ -3,7 +3,7 @@ defmodule Mydia.CrashReporter.Sender do
   Sends crash reports to the metadata relay backend.
 
   Handles the HTTP communication with the metadata relay crash report endpoint.
-  Includes authentication, retry logic, and error handling.
+  Includes retry logic and error handling.
   """
 
   require Logger
@@ -30,26 +30,19 @@ defmodule Mydia.CrashReporter.Sender do
   @spec send_report(map()) :: {:ok, String.t()} | {:error, term()}
   def send_report(report) do
     url = get_crash_report_url()
-    api_key = get_api_key()
 
     # Check if metadata relay is configured
-    cond do
-      url == "" ->
-        {:error, :metadata_relay_not_configured}
-
-      is_nil(api_key) or api_key == "" ->
-        {:error, :api_key_not_configured}
-
-      true ->
-        send_http_request(url, api_key, report)
+    if url == "" do
+      {:error, :metadata_relay_not_configured}
+    else
+      send_http_request(url, report)
     end
   end
 
   # Private functions
 
-  defp send_http_request(url, api_key, report) do
+  defp send_http_request(url, report) do
     headers = [
-      {"authorization", "Bearer #{api_key}"},
       {"content-type", "application/json"}
     ]
 
@@ -65,11 +58,6 @@ defmodule Mydia.CrashReporter.Sender do
         # Validation error
         Logger.warning("Crash report validation failed", response: response)
         {:error, {:validation_error, response}}
-
-      {:ok, %{status: 401}} ->
-        # Authentication failed
-        Logger.error("Crash report authentication failed - check API key")
-        {:error, :authentication_failed}
 
       {:ok, %{status: 429, headers: headers}} ->
         # Rate limited
@@ -139,9 +127,5 @@ defmodule Mydia.CrashReporter.Sender do
   defp get_crash_report_url do
     base_url = Application.get_env(:mydia, :metadata_relay_url, "http://localhost:4001")
     "#{base_url}/crashes/report"
-  end
-
-  defp get_api_key do
-    Application.get_env(:mydia, :crash_report_api_key)
   end
 end

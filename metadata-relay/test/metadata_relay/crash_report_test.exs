@@ -3,12 +3,7 @@ defmodule MetadataRelay.CrashReportTest do
 
   alias MetadataRelay.Router
 
-  @api_key "test_crash_api_key_12345"
-
   setup do
-    # Set up the API key for tests
-    Application.put_env(:metadata_relay, :crash_report_api_key, @api_key)
-
     # Start the rate limiter if not already started
     case GenServer.whereis(MetadataRelay.RateLimiter) do
       nil -> start_supervised!(MetadataRelay.RateLimiter)
@@ -24,15 +19,11 @@ defmodule MetadataRelay.CrashReportTest do
     # Clear the rate limiter table before each test
     :ets.delete_all_objects(:rate_limiter)
 
-    on_exit(fn ->
-      Application.delete_env(:metadata_relay, :crash_report_api_key)
-    end)
-
     :ok
   end
 
   describe "POST /crashes/report" do
-    test "successfully stores a crash report with valid authentication and data" do
+    test "successfully stores a crash report with valid data" do
       crash_report = %{
         "error_type" => "RuntimeError",
         "error_message" => "Test error message",
@@ -46,7 +37,6 @@ defmodule MetadataRelay.CrashReportTest do
 
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("authorization", "Bearer #{@api_key}")
         |> Plug.Conn.put_req_header("content-type", "application/json")
         |> Plug.Parsers.call(
           Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
@@ -57,71 +47,6 @@ defmodule MetadataRelay.CrashReportTest do
       assert %{"status" => "created", "message" => "Crash report received"} = Jason.decode!(conn.resp_body)
     end
 
-    test "returns 401 when API key is missing" do
-      crash_report = %{
-        "error_type" => "RuntimeError",
-        "error_message" => "Test error",
-        "stacktrace" => []
-      }
-
-      conn =
-        Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
-        |> Router.call([])
-
-      assert conn.status == 401
-      assert %{"error" => "Unauthorized"} = Jason.decode!(conn.resp_body)
-    end
-
-    test "returns 401 when API key is invalid" do
-      crash_report = %{
-        "error_type" => "RuntimeError",
-        "error_message" => "Test error",
-        "stacktrace" => []
-      }
-
-      conn =
-        Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("authorization", "Bearer wrong_key")
-        |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
-        |> Router.call([])
-
-      assert conn.status == 401
-      assert %{"error" => "Unauthorized"} = Jason.decode!(conn.resp_body)
-    end
-
-    test "returns 503 when API key is not configured" do
-      # Remove the API key config
-      Application.delete_env(:metadata_relay, :crash_report_api_key)
-
-      crash_report = %{
-        "error_type" => "RuntimeError",
-        "error_message" => "Test error",
-        "stacktrace" => []
-      }
-
-      conn =
-        Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("authorization", "Bearer some_key")
-        |> Plug.Conn.put_req_header("content-type", "application/json")
-        |> Plug.Parsers.call(
-          Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
-        )
-        |> Router.call([])
-
-      assert conn.status == 503
-      assert %{"error" => "Service unavailable"} = Jason.decode!(conn.resp_body)
-
-      # Restore the API key for other tests
-      Application.put_env(:metadata_relay, :crash_report_api_key, @api_key)
-    end
-
     test "returns 400 when required fields are missing" do
       # Missing error_message and stacktrace
       crash_report = %{
@@ -130,7 +55,6 @@ defmodule MetadataRelay.CrashReportTest do
 
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("authorization", "Bearer #{@api_key}")
         |> Plug.Conn.put_req_header("content-type", "application/json")
         |> Plug.Parsers.call(
           Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
@@ -152,7 +76,6 @@ defmodule MetadataRelay.CrashReportTest do
 
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("authorization", "Bearer #{@api_key}")
         |> Plug.Conn.put_req_header("content-type", "application/json")
         |> Plug.Parsers.call(
           Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
@@ -169,7 +92,6 @@ defmodule MetadataRelay.CrashReportTest do
       # (Plug.Parsers would raise in real scenario, but router handles empty params)
       conn =
         Plug.Test.conn(:post, "/crashes/report", %{})
-        |> Plug.Conn.put_req_header("authorization", "Bearer #{@api_key}")
         |> Plug.Conn.put_req_header("content-type", "application/json")
         |> Plug.Parsers.call(
           Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
@@ -197,7 +119,6 @@ defmodule MetadataRelay.CrashReportTest do
       results = for i <- 1..10 do
         conn =
           Plug.Test.conn(:post, "/crashes/report", crash_report)
-          |> Plug.Conn.put_req_header("authorization", "Bearer #{@api_key}")
           |> Plug.Conn.put_req_header("content-type", "application/json")
           |> Plug.Parsers.call(
             Plug.Parsers.init(parsers: [:json], json_decoder: Jason)
@@ -214,7 +135,6 @@ defmodule MetadataRelay.CrashReportTest do
       # 11th request should be rate limited
       conn =
         Plug.Test.conn(:post, "/crashes/report", crash_report)
-        |> Plug.Conn.put_req_header("authorization", "Bearer #{@api_key}")
         |> Plug.Conn.put_req_header("content-type", "application/json")
         |> Plug.Parsers.call(
           Plug.Parsers.init(parsers: [:json], json_decoder: Jason)

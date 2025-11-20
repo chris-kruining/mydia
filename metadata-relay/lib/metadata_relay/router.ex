@@ -265,37 +265,8 @@ defmodule MetadataRelay.Router do
         |> send_resp(429, Jason.encode!(error_response))
 
       {:ok, _remaining} ->
-        # Check API authentication
-        api_key = get_req_header(conn, "authorization") |> List.first()
-        expected_key = Application.get_env(:metadata_relay, :crash_report_api_key)
-
-        cond do
-          is_nil(expected_key) or expected_key == "" ->
-            # API key not configured - reject requests
-            error_response = %{
-              error: "Service unavailable",
-              message: "Crash reporting is not configured"
-            }
-
-            conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(503, Jason.encode!(error_response))
-
-          is_nil(api_key) or api_key != "Bearer #{expected_key}" ->
-            # Authentication failed
-            error_response = %{
-              error: "Unauthorized",
-              message: "Invalid or missing API key"
-            }
-
-            conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(401, Jason.encode!(error_response))
-
-          true ->
-            # Authentication successful - process the report
-            process_crash_report(conn)
-        end
+        # Rate limit passed - process the crash report
+        process_crash_report(conn)
     end
   end
 
