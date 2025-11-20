@@ -185,6 +185,21 @@ defmodule Mydia.Metadata do
   end
 
   @doc """
+  Gets the metadata relay base URL.
+
+  The base URL can be configured via the METADATA_RELAY_URL environment variable,
+  defaulting to the self-hosted relay if not set.
+
+  ## Examples
+
+      iex> Mydia.Metadata.metadata_relay_url()
+      "https://metadata-relay.arsfeld.dev"
+  """
+  def metadata_relay_url do
+    System.get_env("METADATA_RELAY_URL", "https://metadata-relay.arsfeld.dev")
+  end
+
+  @doc """
   Gets the default metadata relay configuration.
 
   This provides a ready-to-use configuration for the metadata-relay service
@@ -203,11 +218,9 @@ defmodule Mydia.Metadata do
       }
   """
   def default_relay_config do
-    base_url = System.get_env("METADATA_RELAY_URL", "https://metadata-relay.arsfeld.dev")
-
     %{
       type: :metadata_relay,
-      base_url: base_url,
+      base_url: metadata_relay_url(),
       options: %{
         language: "en-US",
         include_adult: false,
@@ -232,11 +245,9 @@ defmodule Mydia.Metadata do
       }
   """
   def default_tvdb_relay_config do
-    base_url = System.get_env("METADATA_RELAY_URL", "https://metadata-relay.arsfeld.dev")
-
     %{
       type: :metadata_relay,
-      base_url: base_url,
+      base_url: metadata_relay_url(),
       options: %{
         language: "en-US",
         timeout: 30_000

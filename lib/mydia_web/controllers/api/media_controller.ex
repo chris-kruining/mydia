@@ -136,7 +136,7 @@ defmodule MydiaWeb.Api.MediaController do
         match_result = %{
           provider_id: provider_id,
           provider_type: provider_type,
-          title: metadata[:title] || metadata[:name],
+          title: metadata.title,
           year: extract_year(metadata),
           match_confidence: 1.0,
           # Manual match always has 100% confidence
@@ -194,16 +194,16 @@ defmodule MydiaWeb.Api.MediaController do
     # Extract relevant fields from metadata
     attrs =
       %{
-        title: metadata[:title] || metadata[:name],
+        title: metadata.title,
         tmdb_id: match_result.provider_id,
         metadata: metadata,
         year: extract_year(metadata),
-        overview: metadata[:overview],
-        poster_url: metadata[:poster_path],
-        backdrop_url: metadata[:backdrop_path],
+        overview: metadata.overview,
+        poster_url: metadata.poster_path,
+        backdrop_url: metadata.backdrop_path,
         genres: extract_genres(metadata),
-        runtime: metadata[:runtime],
-        status: metadata[:status]
+        runtime: metadata.runtime,
+        status: metadata.status
       }
       |> Map.reject(fn {_k, v} -> is_nil(v) end)
 
@@ -238,17 +238,11 @@ defmodule MydiaWeb.Api.MediaController do
 
   defp extract_year(metadata) do
     cond do
-      metadata[:release_date] ->
-        case Date.from_iso8601(metadata[:release_date]) do
-          {:ok, date} -> date.year
-          _ -> nil
-        end
+      metadata.release_date ->
+        metadata.release_date.year
 
-      metadata[:first_air_date] ->
-        case Date.from_iso8601(metadata[:first_air_date]) do
-          {:ok, date} -> date.year
-          _ -> nil
-        end
+      metadata.first_air_date ->
+        metadata.first_air_date.year
 
       true ->
         nil
@@ -256,7 +250,7 @@ defmodule MydiaWeb.Api.MediaController do
   end
 
   defp extract_genres(metadata) do
-    case metadata[:genres] do
+    case metadata.genres do
       genres when is_list(genres) ->
         Enum.map(genres, fn
           %{name: name} -> name

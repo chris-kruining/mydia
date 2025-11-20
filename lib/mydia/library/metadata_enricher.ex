@@ -182,8 +182,8 @@ defmodule Mydia.Library.MetadataEnricher do
   defp build_media_item_attrs(metadata, media_type, match_result) do
     %{
       type: media_type_to_string(media_type),
-      title: metadata.title || metadata.name,
-      original_title: metadata.original_title || metadata.original_name,
+      title: metadata.title,
+      original_title: metadata.original_title,
       year: extract_year(metadata),
       tmdb_id: String.to_integer(to_string(metadata.provider_id)),
       imdb_id: metadata.imdb_id,

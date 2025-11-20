@@ -125,7 +125,7 @@ defmodule Mydia.CrashReporter.Sender do
   end
 
   defp get_crash_report_url do
-    base_url = Application.get_env(:mydia, :metadata_relay_url, "http://localhost:4001")
+    base_url = Mydia.Metadata.metadata_relay_url()
     "#{base_url}/crashes/report"
   end
 end

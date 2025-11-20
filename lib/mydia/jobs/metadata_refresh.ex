@@ -177,10 +177,10 @@ defmodule Mydia.Jobs.MetadataRefresh do
 
   defp build_update_attrs(metadata, _media_type) do
     %{
-      title: metadata.title || metadata.name,
-      original_title: metadata.original_title || metadata.original_name,
+      title: metadata.title,
+      original_title: metadata.original_title,
       year: extract_year(metadata),
-      tmdb_id: metadata[:id],
+      tmdb_id: metadata.id,
       imdb_id: metadata.imdb_id,
       metadata: metadata
     }
@@ -223,20 +223,14 @@ defmodule Mydia.Jobs.MetadataRefresh do
 
   defp extract_year(metadata) do
     cond do
-      metadata.release_date && is_binary(metadata.release_date) ->
-        metadata.release_date
-        |> String.slice(0..3)
-        |> String.to_integer()
+      metadata.release_date ->
+        metadata.release_date.year
 
-      metadata.first_air_date && is_binary(metadata.first_air_date) ->
-        metadata.first_air_date
-        |> String.slice(0..3)
-        |> String.to_integer()
+      metadata.first_air_date ->
+        metadata.first_air_date.year
 
       true ->
         nil
     end
-  rescue
-    _ -> nil
   end
 end
