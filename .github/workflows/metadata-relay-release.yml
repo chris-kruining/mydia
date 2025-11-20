@@ -76,47 +76,10 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-  deploy-to-flyio:
-    name: Deploy to Fly.io
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    environment:
-      name: production
-      url: https://metadata-relay.fly.dev
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Fly.io CLI
-        uses: superfly/flyctl-actions/setup-flyctl@master
-
-      - name: Deploy to Fly.io
-        working-directory: metadata-relay
-        run: flyctl deploy --remote-only --config fly.toml
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-
-      - name: Verify deployment
-        run: |
-          echo "Waiting for deployment to stabilize..."
-          sleep 10
-
-          # Check health endpoint
-          HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://metadata-relay.fly.dev/health)
-
-          if [ "$HEALTH_STATUS" -eq 200 ]; then
-            echo "✅ Deployment successful! Health check passed."
-            curl -s https://metadata-relay.fly.dev/health | jq .
-          else
-            echo "❌ Deployment may have issues. Health check returned: $HEALTH_STATUS"
-            exit 1
-          fi
-
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-and-push, deploy-to-flyio]
+    needs: build-and-push
     permissions:
       contents: write
 
@@ -131,23 +94,15 @@ jobs:
           cat > release_notes.md << EOF
           # Metadata Relay v${VERSION}
 
-          ## 🚀 Deployment
+          ## 🚀 Docker Image
 
-          - **Docker Image**: \`${{ needs.build-and-push.outputs.image }}\`
-          - **Production URL**: https://metadata-relay.fly.dev
+          - **Image**: \`${{ needs.build-and-push.outputs.image }}\`
 
           ## 📦 Installation
 
           Pull the Docker image:
           \`\`\`bash
           docker pull ghcr.io/${{ github.repository }}/metadata-relay:${VERSION}
-          \`\`\`
-
-          ## 🔍 Verification
-
-          Check service health:
-          \`\`\`bash
-          curl https://metadata-relay.fly.dev/health
           \`\`\`
 
           ## 📝 Changes
