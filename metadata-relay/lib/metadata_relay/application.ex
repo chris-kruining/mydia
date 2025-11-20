@@ -22,10 +22,9 @@ defmodule MetadataRelay.Application do
         # Cache adapter (Redis or in-memory)
         {cache_adapter, cache_opts},
         # Rate limiter for crash reports
-        MetadataRelay.RateLimiter,
-        # TVDB authentication GenServer
-        MetadataRelay.TVDB.Auth
+        MetadataRelay.RateLimiter
       ] ++
+        maybe_tvdb_auth() ++
         maybe_opensubtitles_auth() ++
         [
           # Phoenix endpoint (serves both API and ErrorTracker dashboard)
@@ -84,6 +83,18 @@ defmodule MetadataRelay.Application do
 
       _ ->
         {:error, :invalid_redis_url}
+    end
+  end
+
+  defp maybe_tvdb_auth do
+    tvdb_key = System.get_env("TVDB_API_KEY")
+
+    if tvdb_key && tvdb_key != "" && tvdb_key != "test_key" do
+      Logger.info("TVDB API key detected, enabling TVDB support")
+      [MetadataRelay.TVDB.Auth]
+    else
+      Logger.warning("TVDB API key not configured or invalid, TVDB support disabled")
+      []
     end
   end
 
