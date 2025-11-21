@@ -268,12 +268,6 @@ defmodule MydiaWeb.ImportMediaLive.Components do
           <div class="stat-value text-lg text-base-content/50">{@scan_stats.skipped}</div>
         </div>
       <% end %>
-      <%= if @scan_stats[:orphaned] && @scan_stats.orphaned > 0 do %>
-        <div class="stat py-2 px-3">
-          <div class="stat-title text-[10px]">Orphaned</div>
-          <div class="stat-value text-lg text-warning">{@scan_stats.orphaned}</div>
-        </div>
-      <% end %>
       <div class="stat py-2 px-3">
         <div class="stat-title text-[10px]">Selected</div>
         <div class="stat-value text-lg">{MapSet.size(@selected_files)}</div>
@@ -492,9 +486,6 @@ defmodule MydiaWeb.ImportMediaLive.Components do
                   <.icon name="hero-pencil" class="w-3 h-3" /> Edited
                 </div>
               <% end %>
-              <%= if @episode.file[:orphaned_media_file_id] do %>
-                <div class="badge badge-xs badge-warning">Re-matching</div>
-              <% end %>
               <div class={"badge badge-xs " <> confidence_badge_class(match.match_confidence)}>
                 {confidence_label(match.match_confidence)}
               </div>
@@ -633,9 +624,6 @@ defmodule MydiaWeb.ImportMediaLive.Components do
                 <div class="badge badge-xs badge-info gap-1">
                   <.icon name="hero-pencil" class="w-3 h-3" /> Edited
                 </div>
-              <% end %>
-              <%= if @movie.file[:orphaned_media_file_id] do %>
-                <div class="badge badge-xs badge-warning">Re-matching</div>
               <% end %>
               <div class={"badge badge-xs " <> confidence_badge_class(match.match_confidence)}>
                 {confidence_label(match.match_confidence)}
@@ -816,9 +804,6 @@ defmodule MydiaWeb.ImportMediaLive.Components do
               </p>
             </div>
             <div class="flex items-center gap-2">
-              <%= if @file.file[:orphaned_media_file_id] do %>
-                <div class="badge badge-xs badge-warning">Re-matching</div>
-              <% end %>
               <div class="badge badge-xs badge-error">No Match</div>
               <button
                 type="button"

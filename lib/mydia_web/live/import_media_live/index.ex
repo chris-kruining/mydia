@@ -833,7 +833,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       }
   end
 
-  defp build_success_message(match_result, is_orphaned) do
+  defp build_success_message(match_result, _is_orphaned) do
     media_type =
       case match_result.parsed_info.type do
         :tv_show ->
@@ -847,14 +847,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
           "Movie"
       end
 
-    action =
-      if is_orphaned do
-        "Re-matched orphaned file as #{media_type}"
-      else
-        "Created #{media_type}"
-      end
-
-    "#{action}: '#{match_result.title}'"
+    "Imported #{media_type}: '#{match_result.title}'"
   end
 
   defp format_error(:not_found), do: "Directory not found"
