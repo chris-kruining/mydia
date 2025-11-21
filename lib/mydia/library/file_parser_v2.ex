@@ -91,6 +91,7 @@ defmodule Mydia.Library.FileParser.V2 do
       |WEBRip                            # WEBRip (must be before WEB)
       |WEB                               # Plain WEB
       |HDTV
+      |DVDScr                            # DVDScr (screener, must be before DVDRip)
       |DVDRip                            # DVDRip (must be before DVD)
       |DVD                               # Plain DVD
     )
@@ -102,7 +103,8 @@ defmodule Mydia.Library.FileParser.V2 do
   # Additional noise patterns
   @bit_depth_pattern ~r/\b(8|10|12)[\s-]?bits?\b/i
   @encoder_pattern ~r/[-_. ](NVENC|QSV|AMF|VCE|VideoToolbox)\b/i
-  @bracket_contents_pattern ~r/\[(HDR|HDR10|HDR10\+|DolbyVision|DoVi|DV|10bit|8bit|x265|x264|HEVC|AVC|2160p|1080p|720p)[^\]]*\]/i
+  # Match any content in square brackets (typically quality/metadata tags, not titles)
+  @bracket_contents_pattern ~r/\[[^\]]+\]/i
   @extra_noise_pattern ~r/\b(PROPER|REPACK|INTERNAL|LIMITED|UNRATED|DIRECTORS?\.CUT|EXTENDED|THEATRICAL|AMZN|NF|ATVP|HYBRID)\b/i
   @audio_channels_pattern ~r/\b[257]\s+1\b/i
   @vmaf_pattern ~r/\bVMAF\d+(?:\.\d+)?\b/i
@@ -112,8 +114,11 @@ defmodule Mydia.Library.FileParser.V2 do
   @year_pattern_secondary ~r/[\s._-](19\d{2}|20\d{2})(?:[\s._-]|$)/
 
   # Release group pattern - hyphen, dot, or space prefix with optional site tag in brackets
-  # Matches groups like "-GROUP", "-MeM.GP", "-GROUP[site]"
-  @release_group_pattern ~r/[-.\s]([A-Z0-9]+(?:[.\s][A-Z0-9]+)?)(?:\[[^\]]+\])?$/i
+  # Matches groups like "-GROUP", " POOLTED", "-MeM.GP", "-GROUP[site]"
+  # Allows optional trailing whitespace to handle cases where brackets were removed
+  # The $ anchor ensures this only matches at the end, preventing false matches on title words
+  # The pattern also requires multiple spaces before the group to avoid matching single-space-separated title words
+  @release_group_pattern ~r/(?:[-.]|\s{2,})([A-Z0-9]+(?:[.\s][A-Z0-9]+)?)(?:\[[^\]]+\])?\s*$/i
 
   # TV show patterns - defined as function to avoid module attribute issues
   defp tv_patterns do
@@ -644,7 +649,7 @@ defmodule Mydia.Library.FileParser.V2 do
   defp clean_title(text) do
     # Known quality markers that might slip through (case-insensitive)
     quality_markers =
-      ~w(uhd hdr hdr10 hdr10+ dolbyvision dovi dv remux atmos dts dd ddp eac3 truehd aac ac3 hevc avc xvid divx vp9 av1 nvenc web bluray bdrip brrip webrip webdl hdtv dvd dvdrip proper repack internal limited unrated extended theatrical amzn nf atvp hybrid)
+      ~w(uhd hdr hdr10 hdr10+ dolbyvision dovi dv remux atmos dts dd ddp eac3 truehd aac ac3 hevc avc xvid divx vp9 av1 nvenc web bluray bdrip brrip webrip webdl hdtv dvd dvdrip dvdscr proper repack internal limited unrated extended theatrical amzn nf atvp hybrid)
 
     text
     # Remove empty brackets/parentheses that remain after extraction
@@ -663,8 +668,37 @@ defmodule Mydia.Library.FileParser.V2 do
     |> Enum.reject(fn word ->
       String.downcase(word) in quality_markers
     end)
-    |> Enum.map(&String.capitalize/1)
+    |> Enum.map(&smart_capitalize/1)
     |> Enum.join(" ")
+  end
+
+  # Smart capitalization that preserves intentional mixed case but normalizes random mixed case
+  defp smart_capitalize(word) do
+    cond do
+      # Empty or very short words - just capitalize
+      String.length(word) < 2 ->
+        String.capitalize(word)
+
+      # All lowercase - capitalize
+      word == String.downcase(word) ->
+        String.capitalize(word)
+
+      # Contains hyphen - preserve (e.g., "One-Punch")
+      String.contains?(word, "-") ->
+        word
+
+      # Already properly capitalized (first letter uppercase, rest lowercase) - preserve
+      word == String.capitalize(word) ->
+        word
+
+      # All uppercase - normalize to capitalized (e.g., "MOVIE" -> "Movie")
+      word == String.upcase(word) ->
+        String.capitalize(word)
+
+      # Mixed case that doesn't follow standard capitalization - normalize
+      true ->
+        String.capitalize(word)
+    end
   end
 
   defp calculate_movie_confidence(title, year, quality) do
@@ -849,7 +883,7 @@ defmodule Mydia.Library.FileParser.V2 do
         "HDTV"
 
       # DVD variants
-      String.match?(normalized, ~r/^(dvd|dvdrip)$/i) ->
+      String.match?(normalized, ~r/^(dvd|dvdrip|dvdscr)$/i) ->
         "DVD"
 
       # Unknown - return as-is

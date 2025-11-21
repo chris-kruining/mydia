@@ -1282,4 +1282,72 @@ defmodule Mydia.Library.FileParser.V2Test do
       assert result.quality.source == "WEB-DL"
     end
   end
+
+  describe "Problematic filenames from task-250" do
+    test "parses Predator Badlands movie with multi-language brackets - task-250.1" do
+      result =
+        FileParser.parse(
+          "Predator Badlands (2025) 1080p DVDScr - x264 - [Tel + Tam + Hin + Eng].mkv"
+        )
+
+      assert result.type == :movie
+      assert result.title == "Predator Badlands"
+      assert result.year == 2025
+      assert result.quality.resolution == "1080p"
+      assert result.quality.codec == "x264"
+    end
+
+    test "parses Severance episode with episode title - task-250.2" do
+      result =
+        FileParser.parse(
+          "Severance.S01E08.What's.for.Dinner.2160p.10bit.ATVP.WEB-DL.DDP5.1.HEVC-Vyndros.mkv"
+        )
+
+      assert result.type == :tv_show
+      assert result.title == "Severance"
+      assert result.season == 1
+      assert result.episodes == [8]
+      assert result.quality.resolution == "2160p"
+      assert result.quality.source == "WEB-DL"
+      assert result.quality.audio == "DDP5.1"
+      assert result.quality.codec == "HEVC"
+      assert result.release_group == "Vyndros"
+    end
+
+    test "parses One-Punch Man with hyphen in series name - task-250.3" do
+      result = FileParser.parse("One-Punch Man - S03E01 - Strategy Meeting.mkv")
+
+      assert result.type == :tv_show
+      assert result.title == "One-Punch Man"
+      assert result.season == 3
+      assert result.episodes == [1]
+    end
+
+    test "parses One-Punch Man S03E02" do
+      result = FileParser.parse("One-Punch Man - S03E02 - Monster Traits.mkv")
+
+      assert result.type == :tv_show
+      assert result.title == "One-Punch Man"
+      assert result.season == 3
+      assert result.episodes == [2]
+    end
+
+    test "parses One-Punch Man S03E03" do
+      result = FileParser.parse("One-Punch Man - S03E03 - Organism Limits.mkv")
+
+      assert result.type == :tv_show
+      assert result.title == "One-Punch Man"
+      assert result.season == 3
+      assert result.episodes == [3]
+    end
+
+    test "parses One-Punch Man S03E04" do
+      result = FileParser.parse("One-Punch Man - S03E04 - Counterattack Signal.mkv")
+
+      assert result.type == :tv_show
+      assert result.title == "One-Punch Man"
+      assert result.season == 3
+      assert result.episodes == [4]
+    end
+  end
 end
