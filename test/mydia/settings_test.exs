@@ -82,44 +82,46 @@ defmodule Mydia.SettingsTest do
       assert is_list(any_profile.qualities)
       assert length(any_profile.qualities) > 0
       assert is_boolean(any_profile.upgrades_allowed)
-      assert is_map(any_profile.rules)
-      assert Map.has_key?(any_profile.rules, "description")
+      assert is_binary(any_profile.description)
 
       # Check the "HD-1080p" profile
       hd_profile = Settings.get_quality_profile_by_name("HD-1080p")
       assert hd_profile.name == "HD-1080p"
       assert "1080p" in hd_profile.qualities
-      assert is_map(hd_profile.rules)
-      assert Map.has_key?(hd_profile.rules, "max_size_mb")
-      assert Map.has_key?(hd_profile.rules, "preferred_sources")
+      assert is_binary(hd_profile.description)
 
       # Check the "4K/UHD" profile
       uhd_profile = Settings.get_quality_profile_by_name("4K/UHD")
       assert uhd_profile.name == "4K/UHD"
       assert "2160p" in uhd_profile.qualities
-      assert is_map(uhd_profile.rules)
+      assert is_binary(uhd_profile.description)
     end
 
-    test "profiles have size constraints in rules" do
+    test "profiles have size constraints in quality_standards" do
       # Ensure we start with a clean slate
       Repo.delete_all(QualityProfile)
 
       # Create default profiles
       {:ok, _count} = Settings.ensure_default_quality_profiles()
 
-      # Check SD profile has max size
+      # Check SD profile has max size (converted to quality_standards)
       sd_profile = Settings.get_quality_profile_by_name("SD")
-      assert sd_profile.rules["max_size_mb"] == 2048
+      assert sd_profile.quality_standards["movie_max_size_mb"] == 2048
+      assert sd_profile.quality_standards["episode_max_size_mb"] == 1024
 
       # Check HD-720p profile has size range
       hd720_profile = Settings.get_quality_profile_by_name("HD-720p")
-      assert hd720_profile.rules["min_size_mb"] == 1024
-      assert hd720_profile.rules["max_size_mb"] == 5120
+      assert hd720_profile.quality_standards["movie_min_size_mb"] == 1024
+      assert hd720_profile.quality_standards["movie_max_size_mb"] == 5120
+      assert hd720_profile.quality_standards["episode_min_size_mb"] == 512
+      assert hd720_profile.quality_standards["episode_max_size_mb"] == 2560
 
       # Check 4K/UHD profile has size constraints
       uhd_profile = Settings.get_quality_profile_by_name("4K/UHD")
-      assert uhd_profile.rules["min_size_mb"] == 15360
-      assert uhd_profile.rules["max_size_mb"] == 81920
+      assert uhd_profile.quality_standards["movie_min_size_mb"] == 15360
+      assert uhd_profile.quality_standards["movie_max_size_mb"] == 81920
+      assert uhd_profile.quality_standards["episode_min_size_mb"] == 7680
+      assert uhd_profile.quality_standards["episode_max_size_mb"] == 40960
     end
 
     test "Any profile allows upgrades, others do not" do
@@ -159,10 +161,12 @@ defmodule Mydia.SettingsTest do
         assert Map.has_key?(profile, :name)
         assert Map.has_key?(profile, :qualities)
         assert Map.has_key?(profile, :upgrades_allowed)
-        assert Map.has_key?(profile, :rules)
+        assert Map.has_key?(profile, :description)
+        assert Map.has_key?(profile, :quality_standards)
         assert is_list(profile.qualities)
         assert is_boolean(profile.upgrades_allowed)
-        assert is_map(profile.rules)
+        assert is_binary(profile.description)
+        assert is_map(profile.quality_standards)
       end)
     end
 
@@ -1904,6 +1908,431 @@ defmodule Mydia.SettingsTest do
       assert minimal.auto_fetch_enabled == false
       assert minimal.auto_refresh_interval_hours == 0
       assert minimal.conflict_resolution == "manual"
+    end
+  end
+
+  describe "export_profile/2" do
+    setup do
+      {:ok, profile} =
+        Settings.create_quality_profile(%{
+          name: "Export Test Profile",
+          description: "Profile for testing export functionality",
+          qualities: ["1080p", "720p"],
+          upgrades_allowed: true,
+          upgrade_until_quality: "1080p",
+          quality_standards: %{
+            preferred_video_codecs: ["h265", "h264"],
+            min_resolution: "720p",
+            max_resolution: "1080p"
+          },
+          metadata_preferences: %{
+            provider_priority: ["metadata_relay", "tvdb"],
+            language: "en-US"
+          }
+        })
+
+      %{profile: profile}
+    end
+
+    test "exports to JSON format by default", %{profile: profile} do
+      {:ok, exported} = Settings.export_profile(profile)
+
+      # Should be valid JSON
+      {:ok, parsed} = Jason.decode(exported)
+
+      assert parsed["schema_version"] == 1
+      assert parsed["name"] == "Export Test Profile"
+      assert parsed["description"] == "Profile for testing export functionality"
+      assert parsed["qualities"] == ["1080p", "720p"]
+      assert parsed["upgrades_allowed"] == true
+      assert parsed["upgrade_until_quality"] == "1080p"
+      assert is_map(parsed["quality_standards"])
+      assert is_map(parsed["metadata_preferences"])
+      assert is_binary(parsed["exported_at"])
+    end
+
+    test "exports to YAML format when specified", %{profile: profile} do
+      {:ok, exported} = Settings.export_profile(profile, format: :yaml)
+
+      # Should be valid YAML
+      {:ok, parsed} = YamlElixir.read_from_string(exported)
+
+      assert parsed["schema_version"] == 1
+      assert parsed["name"] == "Export Test Profile"
+      assert parsed["qualities"] == ["1080p", "720p"]
+    end
+
+    test "includes all profile fields in export", %{profile: profile} do
+      {:ok, exported} = Settings.export_profile(profile, format: :json)
+      {:ok, parsed} = Jason.decode(exported)
+
+      # Check essential fields
+      assert Map.has_key?(parsed, "schema_version")
+      assert Map.has_key?(parsed, "name")
+      assert Map.has_key?(parsed, "description")
+      assert Map.has_key?(parsed, "qualities")
+      assert Map.has_key?(parsed, "upgrades_allowed")
+      assert Map.has_key?(parsed, "upgrade_until_quality")
+      assert Map.has_key?(parsed, "quality_standards")
+      assert Map.has_key?(parsed, "metadata_preferences")
+      assert Map.has_key?(parsed, "version")
+      assert Map.has_key?(parsed, "exported_at")
+    end
+
+    test "pretty prints JSON by default", %{profile: profile} do
+      {:ok, exported_pretty} = Settings.export_profile(profile, format: :json, pretty: true)
+      {:ok, exported_compact} = Settings.export_profile(profile, format: :json, pretty: false)
+
+      # Pretty version should have more newlines
+      assert String.contains?(exported_pretty, "\n")
+      assert byte_size(exported_pretty) > byte_size(exported_compact)
+    end
+
+    test "returns error for unsupported format", %{profile: profile} do
+      assert {:error, message} = Settings.export_profile(profile, format: :xml)
+      assert message =~ "Unsupported format"
+    end
+  end
+
+  describe "import_profile/2" do
+    test "imports profile from JSON string" do
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Imported Profile",
+        "description": "Test import",
+        "qualities": ["1080p"],
+        "upgrades_allowed": false,
+        "quality_standards": {
+          "preferred_video_codecs": ["h265"]
+        }
+      }
+      """
+
+      {:ok, profile} = Settings.import_profile(json_data)
+
+      assert profile.name == "Imported Profile"
+      assert profile.description == "Test import"
+      assert profile.qualities == ["1080p"]
+      assert profile.upgrades_allowed == false
+      assert profile.quality_standards.preferred_video_codecs == ["h265"]
+      assert profile.is_system == false
+      assert is_nil(profile.source_url)
+      refute is_nil(profile.last_synced_at)
+    end
+
+    test "imports profile from YAML string" do
+      yaml_data = """
+      schema_version: 1
+      name: YAML Import Profile
+      qualities:
+        - 720p
+        - 1080p
+      upgrades_allowed: true
+      """
+
+      {:ok, profile} = Settings.import_profile(yaml_data)
+
+      assert profile.name == "YAML Import Profile"
+      assert profile.qualities == ["720p", "1080p"]
+      assert profile.upgrades_allowed == true
+    end
+
+    test "sets source_url for URL imports" do
+      # Mock URL import
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "URL Import Profile",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:ok, profile} =
+        Settings.import_profile(json_data, source_url: "https://example.com/profile.json")
+
+      assert profile.source_url == "https://example.com/profile.json"
+    end
+
+    test "allows name override on import" do
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Original Name",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:ok, profile} = Settings.import_profile(json_data, name: "Custom Name")
+
+      assert profile.name == "Custom Name"
+    end
+
+    test "validates required fields" do
+      json_data = """
+      {
+        "schema_version": 1,
+        "description": "Missing name and qualities"
+      }
+      """
+
+      {:error, message} = Settings.import_profile(json_data)
+
+      assert message =~ "Missing required fields"
+      assert message =~ "name"
+      assert message =~ "qualities"
+    end
+
+    test "rejects unsupported schema version" do
+      json_data = """
+      {
+        "schema_version": 999,
+        "name": "Future Profile",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:error, message} = Settings.import_profile(json_data)
+
+      assert message =~ "Unsupported schema version: 999"
+      assert message =~ "schema version 1"
+    end
+
+    test "rejects legacy format without schema_version" do
+      json_data = """
+      {
+        "name": "Legacy Profile",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:error, message} = Settings.import_profile(json_data)
+
+      assert message =~ "missing schema_version field"
+      assert message =~ "legacy format"
+    end
+
+    test "detects conflicts with existing profiles" do
+      # Create an existing profile
+      {:ok, _existing} =
+        Settings.create_quality_profile(%{
+          name: "Conflict Profile",
+          qualities: ["720p"]
+        })
+
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Conflict Profile",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:error, message} = Settings.import_profile(json_data)
+
+      assert message =~ "already exists"
+    end
+
+    test "atomizes map keys in quality_standards and metadata_preferences" do
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Key Test Profile",
+        "qualities": ["1080p"],
+        "quality_standards": {
+          "preferred_video_codecs": ["h265"]
+        },
+        "metadata_preferences": {
+          "provider_priority": ["tvdb"]
+        }
+      }
+      """
+
+      {:ok, profile} = Settings.import_profile(json_data)
+
+      # Keys should be atoms, not strings
+      assert is_map(profile.quality_standards)
+      assert Map.has_key?(profile.quality_standards, :preferred_video_codecs)
+
+      assert is_map(profile.metadata_preferences)
+      assert Map.has_key?(profile.metadata_preferences, :provider_priority)
+    end
+  end
+
+  describe "import_profile/2 dry run mode" do
+    test "returns preview without creating profile" do
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Dry Run Profile",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:ok, preview} = Settings.import_profile(json_data, dry_run: true)
+
+      assert preview.dry_run == true
+      assert preview.action == :create
+      assert preview.profile.name == "Dry Run Profile"
+      assert preview.conflicts == []
+
+      # Verify profile was not actually created
+      assert Settings.get_quality_profile_by_name("Dry Run Profile") == nil
+    end
+
+    test "detects conflicts in dry run mode" do
+      # Create an existing profile
+      {:ok, existing} =
+        Settings.create_quality_profile(%{
+          name: "Conflict Test",
+          qualities: ["720p"]
+        })
+
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Conflict Test",
+        "qualities": ["1080p"]
+      }
+      """
+
+      {:ok, preview} = Settings.import_profile(json_data, dry_run: true)
+
+      assert preview.dry_run == true
+      assert preview.action == :update
+      assert length(preview.conflicts) == 1
+
+      [conflict] = preview.conflicts
+      assert conflict.type == :name_conflict
+      assert conflict.existing_profile_id == existing.id
+      assert conflict.name == "Conflict Test"
+    end
+
+    test "validates changeset in dry run mode" do
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Validation Test",
+        "qualities": ["1080p"],
+        "quality_standards": {
+          "preferred_video_codecs": ["invalid_codec"]
+        }
+      }
+      """
+
+      {:error, message} = Settings.import_profile(json_data, dry_run: true)
+
+      assert message =~ "Validation failed"
+      assert message =~ "quality_standards"
+    end
+  end
+
+  describe "import_profile/2 with remote URLs" do
+    setup do
+      bypass = Bypass.open()
+      %{bypass: bypass}
+    end
+
+    test "fetches and imports from remote URL", %{bypass: bypass} do
+      json_data = """
+      {
+        "schema_version": 1,
+        "name": "Remote Profile",
+        "qualities": ["1080p", "720p"]
+      }
+      """
+
+      Bypass.expect_once(bypass, "GET", "/profile.json", fn conn ->
+        Plug.Conn.resp(conn, 200, json_data)
+      end)
+
+      url = "http://localhost:#{bypass.port}/profile.json"
+      {:ok, profile} = Settings.import_profile(url)
+
+      assert profile.name == "Remote Profile"
+      assert profile.source_url == url
+    end
+
+    test "handles HTTP errors gracefully", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/notfound.json", fn conn ->
+        Plug.Conn.resp(conn, 404, "Not Found")
+      end)
+
+      url = "http://localhost:#{bypass.port}/notfound.json"
+      {:error, message} = Settings.import_profile(url)
+
+      assert message =~ "Failed to fetch from URL"
+      assert message =~ "404"
+    end
+
+    @tag :skip
+    test "handles network errors gracefully" do
+      # Use an invalid URL that will cause connection error
+      # Note: This test is skipped because it's environment-dependent
+      url = "http://localhost:99999/profile.json"
+      {:error, message} = Settings.import_profile(url)
+
+      assert message =~ "Failed to fetch from URL"
+    end
+  end
+
+  describe "round-trip export/import" do
+    test "exported profile can be re-imported successfully" do
+      # Create original profile
+      {:ok, original} =
+        Settings.create_quality_profile(%{
+          name: "Round Trip Profile",
+          description: "Test round-trip export/import",
+          qualities: ["2160p", "1080p"],
+          upgrades_allowed: true,
+          upgrade_until_quality: "2160p",
+          quality_standards: %{
+            preferred_video_codecs: ["h265", "av1"],
+            preferred_audio_codecs: ["atmos", "truehd"],
+            min_resolution: "1080p",
+            max_resolution: "2160p"
+          },
+          metadata_preferences: %{
+            provider_priority: ["metadata_relay", "tvdb", "tmdb"],
+            language: "en-US",
+            auto_fetch_enabled: true
+          }
+        })
+
+      # Export to JSON
+      {:ok, exported_json} = Settings.export_profile(original, format: :json)
+
+      # Import with different name to avoid conflict
+      {:ok, imported} = Settings.import_profile(exported_json, name: "Round Trip Profile Copy")
+
+      # Verify all settings match
+      assert imported.description == original.description
+      assert imported.qualities == original.qualities
+      assert imported.upgrades_allowed == original.upgrades_allowed
+      assert imported.upgrade_until_quality == original.upgrade_until_quality
+      assert imported.quality_standards == original.quality_standards
+      assert imported.metadata_preferences == original.metadata_preferences
+    end
+
+    test "YAML round-trip preserves all data" do
+      {:ok, original} =
+        Settings.create_quality_profile(%{
+          name: "YAML Round Trip",
+          qualities: ["1080p"],
+          quality_standards: %{
+            preferred_video_codecs: ["h264"]
+          }
+        })
+
+      # Export to YAML
+      {:ok, exported_yaml} = Settings.export_profile(original, format: :yaml)
+
+      # Import with different name
+      {:ok, imported} = Settings.import_profile(exported_yaml, name: "YAML Round Trip Copy")
+
+      # Verify core settings match
+      assert imported.qualities == original.qualities
+      assert imported.quality_standards == original.quality_standards
     end
   end
 end

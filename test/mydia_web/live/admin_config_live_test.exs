@@ -151,9 +151,9 @@ defmodule MydiaWeb.AdminConfigLiveTest do
           qualities: ["720p", "1080p"],
           upgrades_allowed: true,
           upgrade_until_quality: "1080p",
-          rules: %{
-            min_size_mb: 1000,
-            max_size_mb: 5000,
+          quality_standards: %{
+            movie_min_size_mb: 1000,
+            movie_max_size_mb: 5000,
             preferred_sources: []
           }
         })
