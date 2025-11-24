@@ -355,9 +355,9 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
   describe "seeder scoring" do
     test "more seeders get higher scores" do
       results = [
-        build_result(%{seeders: 10, title: "Movie.1080p.x264"}),
-        build_result(%{seeders: 100, title: "Movie.1080p.x264"}),
-        build_result(%{seeders: 1000, title: "Movie.1080p.x264"})
+        build_result(%{seeders: 10, leechers: 10, title: "Movie.1080p.x264"}),
+        build_result(%{seeders: 100, leechers: 100, title: "Movie.1080p.x264"}),
+        build_result(%{seeders: 1000, leechers: 1000, title: "Movie.1080p.x264"})
       ]
 
       ranked = ReleaseRanker.rank_all(results)
@@ -367,7 +367,7 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
     end
 
     test "zero seeders get zero score" do
-      result = build_result(%{seeders: 0})
+      result = build_result(%{seeders: 0, leechers: 10})
 
       ranked = ReleaseRanker.rank_all([result], min_seeders: 0)
 
@@ -376,8 +376,8 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
 
     test "seeder scoring has diminishing returns" do
       results = [
-        build_result(%{seeders: 100, title: "Movie.1080p.x264"}),
-        build_result(%{seeders: 1000, title: "Movie.1080p.x264"})
+        build_result(%{seeders: 100, leechers: 100, title: "Movie.1080p.x264"}),
+        build_result(%{seeders: 1000, leechers: 1000, title: "Movie.1080p.x264"})
       ]
 
       ranked = ReleaseRanker.rank_all(results)
@@ -387,6 +387,157 @@ defmodule Mydia.Indexers.ReleaseRankerTest do
 
       # 10x seeders should not give 10x score (diminishing returns)
       assert score_1000 < score_100 * 2
+    end
+
+    test "healthy swarm (high ratio) scores higher than oversaturated swarm" do
+      # Same seeder count but different ratios
+      results = [
+        # Oversaturated: 300 seeders, 1500 leechers (17% ratio) - 0.1x multiplier
+        build_result(%{
+          seeders: 300,
+          leechers: 1500,
+          title: "Movie.Oversaturated.1080p.x264"
+        }),
+        # Healthy: 60 seeders, 30 leechers (67% ratio) - 1.0x multiplier
+        build_result(%{
+          seeders: 60,
+          leechers: 30,
+          title: "Movie.Healthy.1080p.x264"
+        })
+      ]
+
+      ranked = ReleaseRanker.rank_all(results, min_seeders: 50)
+
+      oversaturated =
+        Enum.find(ranked, &String.contains?(&1.result.title, "Oversaturated")).breakdown.seeders
+
+      healthy = Enum.find(ranked, &String.contains?(&1.result.title, "Healthy")).breakdown.seeders
+
+      # Healthy swarm should score higher despite having fewer seeders
+      assert healthy > oversaturated
+    end
+
+    test "excellent ratio (80%+) gets bonus multiplier" do
+      results = [
+        # Excellent ratio: 80 seeders, 20 leechers (80% ratio) - 1.3x multiplier
+        build_result(%{
+          seeders: 80,
+          leechers: 20,
+          title: "Movie.Excellent.1080p.x264"
+        }),
+        # Healthy ratio: 67 seeders, 33 leechers (67% ratio) - 1.0x multiplier
+        build_result(%{
+          seeders: 67,
+          leechers: 33,
+          title: "Movie.Healthy.1080p.x264"
+        })
+      ]
+
+      ranked = ReleaseRanker.rank_all(results, min_seeders: 50)
+
+      excellent =
+        Enum.find(ranked, &String.contains?(&1.result.title, "Excellent")).breakdown.seeders
+
+      healthy = Enum.find(ranked, &String.contains?(&1.result.title, "Healthy")).breakdown.seeders
+
+      # Excellent ratio should get bonus over healthy ratio
+      assert excellent > healthy
+    end
+
+    test "ratio multipliers are applied correctly at different thresholds" do
+      results = [
+        # <15% ratio: 0.1x multiplier
+        build_result(%{seeders: 10, leechers: 90, title: "Movie.VeryBad"}),
+        # 30% ratio: 0.5x multiplier
+        build_result(%{seeders: 30, leechers: 70, title: "Movie.Poor"}),
+        # 50% ratio: 0.8x multiplier
+        build_result(%{seeders: 50, leechers: 50, title: "Movie.Decent"}),
+        # 67% ratio: 1.0x multiplier
+        build_result(%{seeders: 67, leechers: 33, title: "Movie.Healthy"}),
+        # 80%+ ratio: 1.3x multiplier
+        build_result(%{seeders: 80, leechers: 20, title: "Movie.Excellent"})
+      ]
+
+      ranked = ReleaseRanker.rank_all(results, min_seeders: 5)
+
+      very_bad =
+        Enum.find(ranked, &String.contains?(&1.result.title, "VeryBad")).breakdown.seeders
+
+      poor = Enum.find(ranked, &String.contains?(&1.result.title, "Poor")).breakdown.seeders
+      decent = Enum.find(ranked, &String.contains?(&1.result.title, "Decent")).breakdown.seeders
+      healthy = Enum.find(ranked, &String.contains?(&1.result.title, "Healthy")).breakdown.seeders
+
+      excellent =
+        Enum.find(ranked, &String.contains?(&1.result.title, "Excellent")).breakdown.seeders
+
+      # Scores should increase with better ratios
+      assert very_bad < poor
+      assert poor < decent
+      assert decent < healthy
+      assert healthy < excellent
+    end
+  end
+
+  describe "minimum ratio filtering" do
+    test "filters out torrents below minimum ratio" do
+      results = [
+        # 10% ratio - should be filtered
+        build_result(%{seeders: 10, leechers: 90, title: "Movie.Bad.1080p.x264"}),
+        # 20% ratio - should pass
+        build_result(%{seeders: 20, leechers: 80, title: "Movie.Ok.1080p.x264"}),
+        # 50% ratio - should pass
+        build_result(%{seeders: 50, leechers: 50, title: "Movie.Good.1080p.x264"})
+      ]
+
+      # Filter for minimum 15% ratio
+      filtered = ReleaseRanker.filter_acceptable(results, min_seeders: 0, min_ratio: 0.15)
+
+      # Only the 20% and 50% ratio results should remain
+      assert length(filtered) == 2
+      refute Enum.any?(filtered, &String.contains?(&1.title, "Bad"))
+    end
+
+    test "nil min_ratio does not filter" do
+      results = [
+        build_result(%{seeders: 1, leechers: 99, title: "Movie.VeryBad.1080p.x264"}),
+        build_result(%{seeders: 50, leechers: 50, title: "Movie.Good.1080p.x264"})
+      ]
+
+      filtered = ReleaseRanker.filter_acceptable(results, min_seeders: 0, min_ratio: nil)
+
+      # Both should pass when no ratio filter is set
+      assert length(filtered) == 2
+    end
+
+    test "works with select_best_result" do
+      results = [
+        # High seeders but poor ratio
+        build_result(%{
+          seeders: 300,
+          leechers: 1500,
+          title: "Movie.2023.1080p.Popular.But.Stalled"
+        }),
+        # Fewer seeders but good ratio
+        build_result(%{seeders: 60, leechers: 30, title: "Movie.2023.1080p.Healthy"})
+      ]
+
+      best = ReleaseRanker.select_best_result(results, min_seeders: 50, min_ratio: 0.15)
+
+      # The healthy swarm should win even with fewer seeders
+      assert best != nil
+      assert String.contains?(best.result.title, "Healthy")
+    end
+
+    test "allows torrents with zero peers" do
+      results = [
+        # Brand new torrent with no peers yet
+        build_result(%{seeders: 0, leechers: 0, title: "Movie.New.1080p.x264"})
+      ]
+
+      filtered = ReleaseRanker.filter_acceptable(results, min_seeders: 0, min_ratio: 0.15)
+
+      # Should allow torrents with no peers (can't calculate ratio)
+      assert length(filtered) == 1
     end
   end
 

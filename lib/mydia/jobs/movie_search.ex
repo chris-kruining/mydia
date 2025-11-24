@@ -240,11 +240,24 @@ defmodule Mydia.Jobs.MovieSearch do
   defp build_quality_options(quality_profile) do
     # Extract preferred qualities from quality profile
     # Quality profiles should have a list of allowed qualities in preference order
-    case Map.get(quality_profile, :allowed_qualities) do
-      nil -> []
-      qualities when is_list(qualities) -> [preferred_qualities: qualities]
-      _ -> []
-    end
+    quality_opts =
+      case Map.get(quality_profile, :allowed_qualities) do
+        nil -> []
+        qualities when is_list(qualities) -> [preferred_qualities: qualities]
+        _ -> []
+      end
+
+    # Extract min_ratio from rules if present
+    rules_opts =
+      case Map.get(quality_profile, :rules) do
+        %{"min_ratio" => min_ratio} when is_number(min_ratio) ->
+          [min_ratio: min_ratio]
+
+        _ ->
+          []
+      end
+
+    Keyword.merge(quality_opts, rules_opts)
   end
 
   defp maybe_add_option(opts, _key, nil), do: opts

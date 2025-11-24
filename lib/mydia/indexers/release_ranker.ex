@@ -20,13 +20,21 @@ defmodule Mydia.Indexers.ReleaseRanker do
   ## Scoring Factors
 
   - **Quality** (60% weight): Resolution, source, codec via `QualityParser`
-  - **Seeders** (25% weight): Logarithmic scale with diminishing returns
+  - **Seeders** (25% weight): Logarithmic scale with ratio multiplier
   - **Size** (10% weight): Bell curve favoring reasonable sizes
   - **Age** (5% weight): Slight preference for newer releases
+
+  The seeder scoring now incorporates seeder/leecher ratio to favor healthy swarms:
+  - Ratio < 15%: 0.1x multiplier (oversaturated)
+  - Ratio 30%: 0.5x multiplier (poor)
+  - Ratio 50%: 0.8x multiplier (decent)
+  - Ratio 67%: 1.0x multiplier (healthy)
+  - Ratio ≥ 80%: 1.3x multiplier (excellent)
 
   ## Options
 
   - `:min_seeders` - Minimum seeder count (default: 5)
+  - `:min_ratio` - Minimum seeder ratio as percentage (default: nil)
   - `:size_range` - `{min_mb, max_mb}` tuple (default: `{100, 20_000}`)
   - `:preferred_qualities` - List of resolutions in preference order
   - `:blocked_tags` - List of strings to filter out from titles
@@ -41,6 +49,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   @type ranking_options :: [
           min_seeders: non_neg_integer(),
+          min_ratio: float() | nil,
           size_range: {non_neg_integer(), non_neg_integer()},
           preferred_qualities: [String.t()],
           blocked_tags: [String.t()],
@@ -103,6 +112,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   Removes results that:
   - Have fewer than `:min_seeders` seeders
+  - Have seeder ratio below `:min_ratio` (if specified)
   - Fall outside the `:size_range` (in MB)
   - Contain any `:blocked_tags` in their title
 
@@ -110,15 +120,20 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
       iex> ReleaseRanker.filter_acceptable(results, min_seeders: 10, blocked_tags: ["CAM"])
       [%SearchResult{...}, ...]
+
+      iex> ReleaseRanker.filter_acceptable(results, min_ratio: 0.15)
+      [%SearchResult{...}, ...]
   """
   @spec filter_acceptable([SearchResult.t()], ranking_options()) :: [SearchResult.t()]
   def filter_acceptable(results, opts \\ []) do
     min_seeders = Keyword.get(opts, :min_seeders, @default_min_seeders)
+    min_ratio = Keyword.get(opts, :min_ratio)
     size_range = Keyword.get(opts, :size_range, @default_size_range)
     blocked_tags = Keyword.get(opts, :blocked_tags, [])
 
     results
     |> Enum.filter(&meets_seeder_minimum?(&1, min_seeders))
+    |> Enum.filter(&meets_ratio_minimum?(&1, min_ratio))
     |> Enum.filter(&within_size_range?(&1, size_range))
     |> Enum.filter(&not_blocked?(&1, blocked_tags))
   end
@@ -127,6 +142,20 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   defp meets_seeder_minimum?(%SearchResult{seeders: seeders}, min_seeders) do
     seeders >= min_seeders
+  end
+
+  defp meets_ratio_minimum?(_result, nil), do: true
+
+  defp meets_ratio_minimum?(%SearchResult{seeders: seeders, leechers: leechers}, min_ratio) do
+    total_peers = seeders + leechers
+
+    if total_peers == 0 do
+      # No peers at all - allow it
+      true
+    else
+      seeder_ratio = seeders / total_peers
+      seeder_ratio >= min_ratio
+    end
   end
 
   defp within_size_range?(%SearchResult{size: size_bytes}, {min_mb, max_mb}) do
@@ -146,7 +175,7 @@ defmodule Mydia.Indexers.ReleaseRanker do
 
   defp calculate_score_breakdown(%SearchResult{} = result, opts) do
     quality_score = score_quality(result, opts)
-    seeder_score = score_seeders(result.seeders)
+    seeder_score = score_seeders_and_peers(result)
     size_score = score_size(result.size)
     age_score = score_age(result.published_at)
     tag_bonus = score_tags(result.title, opts)
@@ -206,15 +235,33 @@ defmodule Mydia.Indexers.ReleaseRanker do
     end
   end
 
-  defp score_seeders(seeders) when seeders <= 0, do: 0.0
+  defp score_seeders_and_peers(%SearchResult{seeders: seeders}) when seeders <= 0, do: 0.0
 
-  defp score_seeders(seeders) do
-    # Logarithmic scale with diminishing returns
+  defp score_seeders_and_peers(%SearchResult{seeders: seeders, leechers: leechers}) do
+    # Logarithmic scale with diminishing returns for base seeder count
     # 1 seeder ≈ 0, 10 seeders ≈ 100, 100 seeders ≈ 200, 1000 seeders ≈ 300
     base = :math.log10(seeders) * 100
 
     # Cap at 500 to prevent seeder count from dominating
-    min(base, 500.0)
+    base_capped = min(base, 500.0)
+
+    # Calculate seeder percentage (ratio)
+    total_peers = seeders + leechers
+    seeder_percentage = if total_peers > 0, do: seeders / total_peers, else: 0.0
+
+    # Apply ratio multiplier based on seeder percentage
+    # This penalizes oversaturated swarms and rewards healthy ones
+    ratio_multiplier =
+      cond do
+        seeder_percentage < 0.15 -> 0.1
+        seeder_percentage < 0.30 -> 0.5
+        seeder_percentage < 0.50 -> 0.8
+        seeder_percentage < 0.67 -> 1.0
+        seeder_percentage >= 0.80 -> 1.3
+        true -> 1.0
+      end
+
+    base_capped * ratio_multiplier
   end
 
   defp score_size(size_bytes) do
