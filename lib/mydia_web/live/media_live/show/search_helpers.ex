@@ -26,8 +26,8 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
   end
 
   def apply_search_filters(socket) do
-    # Re-filter the current results without re-searching
-    results = socket.assigns.search_results |> Enum.map(fn {_id, result} -> result end)
+    # Re-filter from raw results without re-searching
+    results = Map.get(socket.assigns, :raw_search_results, [])
     filtered_results = filter_search_results(results, socket.assigns)
     media_item = socket.assigns.media_item
     quality_profile = media_item.quality_profile
@@ -42,14 +42,15 @@ defmodule MydiaWeb.MediaLive.Show.SearchHelpers do
   end
 
   def apply_search_sort(socket) do
-    # Re-sort the current results
-    results = socket.assigns.search_results |> Enum.map(fn {_id, result} -> result end)
+    # Re-filter and re-sort from raw results
+    results = Map.get(socket.assigns, :raw_search_results, [])
+    filtered_results = filter_search_results(results, socket.assigns)
     media_item = socket.assigns.media_item
     quality_profile = media_item.quality_profile
     media_type = get_media_type(media_item)
 
     sorted_results =
-      sort_search_results(results, socket.assigns.sort_by, quality_profile, media_type)
+      sort_search_results(filtered_results, socket.assigns.sort_by, quality_profile, media_type)
 
     socket
     |> Phoenix.LiveView.stream(:search_results, sorted_results, reset: true)

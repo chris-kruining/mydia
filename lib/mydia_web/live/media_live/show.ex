@@ -112,6 +112,7 @@ defmodule MydiaWeb.MediaLive.Show do
      # Feature flags
      |> assign(:playback_enabled, playback_enabled?())
      |> assign(:subtitle_feature_enabled, subtitle_feature_enabled?())
+     |> assign(:raw_search_results, [])
      |> stream_configure(:search_results, dom_id: &generate_result_id/1)
      |> stream(:search_results, [])}
   end
@@ -929,6 +930,7 @@ defmodule MydiaWeb.MediaLive.Show do
      |> assign(:manual_search_context, nil)
      |> assign(:searching, false)
      |> assign(:results_empty?, false)
+     |> assign(:raw_search_results, [])
      |> stream(:search_results, [], reset: true)}
   end
 
@@ -1254,6 +1256,7 @@ defmodule MydiaWeb.MediaLive.Show do
      socket
      |> assign(:searching, false)
      |> assign(:results_empty?, sorted_results == [])
+     |> assign(:raw_search_results, results)
      |> stream(:search_results, sorted_results, reset: true)}
   end
 
