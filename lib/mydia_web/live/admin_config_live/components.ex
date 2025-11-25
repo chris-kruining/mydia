@@ -748,14 +748,6 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           <span class="badge badge-ghost">{length(@indexers)}</span>
         </h2>
         <div class="flex gap-2">
-          <%= if Mydia.Indexers.CardigannFeatureFlags.enabled?() do %>
-            <.link
-              navigate={~p"/admin/config/indexers/library"}
-              class="btn btn-sm btn-ghost"
-            >
-              <.icon name="hero-book-open" class="w-4 h-4" /> Cardigann
-            </.link>
-          <% end %>
           <button class="btn btn-sm btn-primary" phx-click="new_indexer">
             <.icon name="hero-plus" class="w-4 h-4" /> New
           </button>

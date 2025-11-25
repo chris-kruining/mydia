@@ -126,7 +126,6 @@ defmodule MydiaWeb.Router do
         {MydiaWeb.Live.UserAuth, :load_navigation_data}
       ] do
       live "/config", AdminConfigLive.Index, :index
-      live "/config/indexers/library", AdminConfigLive.IndexerLibrary, :index
       live "/jobs", JobsLive.Index, :index
       live "/requests", AdminRequestsLive.Index, :index
       live "/users", AdminUsersLive.Index, :index

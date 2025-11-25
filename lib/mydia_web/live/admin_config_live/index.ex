@@ -6,6 +6,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   alias Mydia.Settings.{QualityProfile, DownloadClientConfig, IndexerConfig, LibraryPath}
   alias Mydia.Downloads.ClientHealth
   alias Mydia.Indexers.Health, as: IndexerHealth
+  alias Mydia.Indexers.CardigannFeatureFlags
   alias Mydia.System
   alias MydiaWeb.AdminConfigLive.Components
 
@@ -26,6 +27,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      socket
      |> assign(:page_title, "Configuration")
      |> assign(:active_tab, "status")
+     |> assign(:cardigann_enabled, CardigannFeatureFlags.enabled?())
      |> load_configuration_data()
      |> load_system_data()}
   end

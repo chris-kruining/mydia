@@ -56,6 +56,16 @@
       >
         <.icon name="hero-folder" class="w-4 h-4" /> Library
       </button>
+      <%= if @cardigann_enabled do %>
+        <button
+          role="tab"
+          class={["tab gap-2", @active_tab == "cardigann" && "tab-active"]}
+          phx-click="change_tab"
+          phx-value-tab="cardigann"
+        >
+          <.icon name="hero-book-open" class="w-4 h-4" /> Cardigann
+        </button>
+      <% end %>
       <div class="tab-content block bg-base-100 border-base-300">
         <%!-- System Status Tab --%>
         <%= if @active_tab == "status" do %>
@@ -92,6 +102,14 @@
         <%!-- Library Paths Tab --%>
         <%= if @active_tab == "library" do %>
           <Components.library_paths_tab library_paths={@library_paths} />
+        <% end %>
+        <%!-- Cardigann Library Tab --%>
+        <%= if @active_tab == "cardigann" and @cardigann_enabled do %>
+          <.live_component
+            module={MydiaWeb.AdminConfigLive.CardigannLibraryComponent}
+            id="cardigann-library"
+            current_user={@current_user}
+          />
         <% end %>
       </div>
     </div>
