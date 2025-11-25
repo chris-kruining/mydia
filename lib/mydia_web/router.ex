@@ -106,6 +106,15 @@ defmodule MydiaWeb.Router do
     end
   end
 
+  # Admin redirect routes (before live_session for proper matching)
+  scope "/admin", MydiaWeb do
+    pipe_through [:browser, :auth, :require_authenticated, :require_admin]
+
+    # Redirect old status routes to consolidated config page
+    get "/", RedirectController, :admin_config
+    get "/status", RedirectController, :admin_config
+  end
+
   # Admin LiveView routes
   scope "/admin", MydiaWeb do
     pipe_through [:browser, :auth, :require_authenticated, :require_admin]
@@ -116,8 +125,6 @@ defmodule MydiaWeb.Router do
         {MydiaWeb.Live.UserAuth, {:ensure_role, :admin}},
         {MydiaWeb.Live.UserAuth, :load_navigation_data}
       ] do
-      live "/", AdminStatusLive.Index, :index
-      live "/status", AdminStatusLive.Index, :index
       live "/config", AdminConfigLive.Index, :index
       live "/config/indexers/library", AdminConfigLive.IndexerLibrary, :index
       live "/jobs", JobsLive.Index, :index

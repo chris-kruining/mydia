@@ -5,11 +5,13 @@ defmodule MydiaWeb.AdminConfigLiveTest do
   alias Mydia.{Accounts, Settings}
 
   setup do
-    # Create an admin user for testing
+    # Create an admin user for testing with unique identifiers
+    unique_id = System.unique_integer([:positive])
+
     {:ok, user} =
       Accounts.create_user(%{
-        email: "admin@example.com",
-        username: "admin",
+        email: "admin_#{unique_id}@example.com",
+        username: "admin_#{unique_id}",
         password_hash: "$2b$12$test",
         role: "admin"
       })
@@ -65,7 +67,73 @@ defmodule MydiaWeb.AdminConfigLiveTest do
         |> put_req_header("authorization", "Bearer #{token}")
 
       {:ok, _view, html} = live(conn, ~p"/admin/config")
-      assert html =~ "Configuration Management"
+      assert html =~ "Configuration"
+    end
+  end
+
+  describe "Index - Redirects" do
+    setup %{conn: conn, token: token} do
+      conn =
+        conn
+        |> init_test_session(%{})
+        |> put_session(:guardian_default_token, token)
+        |> put_req_header("authorization", "Bearer #{token}")
+
+      %{conn: conn}
+    end
+
+    test "/admin redirects to /admin/config", %{conn: conn} do
+      conn = get(conn, ~p"/admin")
+      assert redirected_to(conn) == "/admin/config"
+    end
+
+    test "/admin/status redirects to /admin/config", %{conn: conn} do
+      conn = get(conn, ~p"/admin/status")
+      assert redirected_to(conn) == "/admin/config"
+    end
+  end
+
+  describe "Index - System Status Tab" do
+    setup %{conn: conn, token: token} do
+      # Start the Indexers.Health GenServer to initialize ETS tables
+      start_supervised!(Mydia.Indexers.Health)
+
+      conn =
+        conn
+        |> init_test_session(%{})
+        |> put_session(:guardian_default_token, token)
+        |> put_req_header("authorization", "Bearer #{token}")
+
+      {:ok, view, _html} = live(conn, ~p"/admin/config")
+      %{conn: conn, view: view}
+    end
+
+    test "renders system status tab by default", %{view: view} do
+      assert has_element?(view, ~s{button[class*="tab-active"]}, "Status")
+    end
+
+    test "displays system information", %{view: view} do
+      assert has_element?(view, "h3", "System")
+      assert has_element?(view, ".stat-title", "Version")
+      assert has_element?(view, ".stat-title", "Elixir")
+      assert has_element?(view, ".stat-title", "Memory")
+      assert has_element?(view, ".stat-title", "Uptime")
+    end
+
+    test "displays database information", %{view: view} do
+      assert has_element?(view, "h3", "Database")
+    end
+
+    test "displays database adapter-specific information", %{view: view} do
+      html = render(view)
+
+      if Mydia.DB.postgres?() do
+        # PostgreSQL mode
+        assert html =~ "PostgreSQL"
+      else
+        # SQLite mode
+        assert html =~ "SQLite"
+      end
     end
   end
 
@@ -84,44 +152,49 @@ defmodule MydiaWeb.AdminConfigLiveTest do
       %{conn: conn, view: view}
     end
 
-    test "renders general settings tab by default", %{view: view} do
-      assert has_element?(view, ~s{button[class*="tab-active"]}, "General Settings")
+    test "switches to settings tab", %{view: view} do
+      view
+      |> element(~s{button[role="tab"]}, "Settings")
+      |> render_click()
+
+      assert_patched(view, ~p"/admin/config?tab=general")
+      assert has_element?(view, ~s{button[class*="tab-active"]}, "Settings")
     end
 
-    test "switches to quality profiles tab", %{view: view} do
+    test "switches to quality tab", %{view: view} do
       view
-      |> element(~s{button}, "Quality Profiles")
+      |> element(~s{button[role="tab"]}, "Quality")
       |> render_click()
 
       assert_patched(view, ~p"/admin/config?tab=quality")
-      assert has_element?(view, ~s{button[class*="tab-active"]}, "Quality Profiles")
+      assert has_element?(view, ~s{button[class*="tab-active"]}, "Quality")
     end
 
-    test "switches to download clients tab", %{view: view} do
+    test "switches to clients tab", %{view: view} do
       view
-      |> element(~s{button}, "Download Clients")
+      |> element(~s{button[role="tab"]}, "Clients")
       |> render_click()
 
       assert_patched(view, ~p"/admin/config?tab=clients")
-      assert has_element?(view, ~s{button[class*="tab-active"]}, "Download Clients")
+      assert has_element?(view, ~s{button[class*="tab-active"]}, "Clients")
     end
 
     test "switches to indexers tab", %{view: view} do
       view
-      |> element(~s{button}, "Indexers")
+      |> element(~s{button[role="tab"]}, "Indexers")
       |> render_click()
 
       assert_patched(view, ~p"/admin/config?tab=indexers")
       assert has_element?(view, ~s{button[class*="tab-active"]}, "Indexers")
     end
 
-    test "switches to library paths tab", %{view: view} do
+    test "switches to library tab", %{view: view} do
       view
-      |> element(~s{button}, "Library Paths")
+      |> element(~s{button[role="tab"]}, "Library")
       |> render_click()
 
       assert_patched(view, ~p"/admin/config?tab=library")
-      assert has_element?(view, ~s{button[class*="tab-active"]}, "Library Paths")
+      assert has_element?(view, ~s{button[class*="tab-active"]}, "Library")
     end
   end
 
@@ -140,8 +213,9 @@ defmodule MydiaWeb.AdminConfigLiveTest do
       %{conn: conn, view: view}
     end
 
-    test "displays empty state when no profiles exist", %{view: view} do
-      assert has_element?(view, ~s{div[class*="alert-info"]}, "No quality profiles configured")
+    test "displays quality profiles section", %{view: view} do
+      # Default profiles may exist, just verify the quality profiles section renders
+      assert has_element?(view, "h3", "Quality Profiles")
     end
 
     test "displays existing quality profiles", %{conn: conn} do
@@ -166,7 +240,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
     test "opens modal when clicking new profile button", %{view: view} do
       view
-      |> element(~s{button}, "New Profile")
+      |> element(~s{button[phx-click="new_quality_profile"]})
       |> render_click()
 
       assert has_element?(view, ~s{div[class*="modal-open"]})
@@ -175,18 +249,14 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
     test "creates a new quality profile", %{view: view} do
       view
-      |> element(~s{button}, "New Profile")
+      |> element(~s{button[phx-click="new_quality_profile"]})
       |> render_click()
 
       view
       |> form("#quality-profile-form",
         quality_profile: %{
           "name" => "4K Ultra HD",
-          "qualities" => ["2160p", "1080p"],
-          "rules" => %{
-            "min_size_mb" => "5000",
-            "max_size_mb" => "20000"
-          }
+          "qualities" => ["2160p", "1080p"]
         }
       )
       |> render_submit()
@@ -197,7 +267,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
     test "validates quality profile form", %{view: view} do
       view
-      |> element(~s{button}, "New Profile")
+      |> element(~s{button[phx-click="new_quality_profile"]})
       |> render_click()
 
       # Submit without required name field
@@ -253,7 +323,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
     test "creates a new download client", %{view: view} do
       view
-      |> element(~s{button}, "New Client")
+      |> element(~s{button[phx-click="new_download_client"]})
       |> render_click()
 
       view
@@ -317,7 +387,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
     test "creates a new indexer", %{view: view} do
       view
-      |> element(~s{button}, "New Indexer")
+      |> element(~s{button[phx-click="new_indexer"]})
       |> render_click()
 
       view
@@ -363,8 +433,8 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
       # Should not crash with UndefinedFunctionError or :atom.cast/1 error
       assert html =~ "Setting updated successfully"
-      # Verify the form still renders without error
-      assert has_element?(view, "#settings-form-Authentication")
+      # Verify the settings table still renders without error
+      assert has_element?(view, "table")
     end
 
     test "toggles crash reporting setting without category validation error", %{
@@ -454,7 +524,7 @@ defmodule MydiaWeb.AdminConfigLiveTest do
       end)
 
       view
-      |> element(~s{button}, "New Path")
+      |> element(~s{button[phx-click="new_library_path"]})
       |> render_click()
 
       view
