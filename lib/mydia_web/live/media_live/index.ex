@@ -505,28 +505,15 @@ defmodule MydiaWeb.MediaLive.Index do
       |> assign(:has_more, has_more)
       |> assign(:media_items_empty?, reset? and items == [])
 
-    # When resetting, delete all items that are not in the new filtered set
+    # Use reset: true when filtering/searching to properly clear and repopulate the stream
     socket =
       if reset? do
-        filtered_ids = MapSet.new(paginated_items, & &1.id)
-
-        items_to_delete =
-          Enum.reject(all_items, fn item -> MapSet.member?(filtered_ids, item.id) end)
-
-        Logger.debug("Deleting #{length(items_to_delete)} items from stream")
-
-        socket
-        |> then(fn sock ->
-          Enum.reduce(items_to_delete, sock, fn item, acc ->
-            stream_delete(acc, :media_items, item)
-          end)
-        end)
-        |> stream(:media_items, paginated_items)
+        stream(socket, :media_items, paginated_items, reset: true)
       else
         stream(socket, :media_items, paginated_items)
       end
 
-    Logger.debug("stream updated")
+    Logger.debug("stream updated, reset=#{reset?}, count=#{length(paginated_items)}")
     socket
   end
 
