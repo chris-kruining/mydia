@@ -441,8 +441,8 @@ defmodule MydiaWeb.AdminConfigLiveTest do
 
       # Should not crash with UndefinedFunctionError or :atom.cast/1 error
       assert html =~ "Setting updated successfully"
-      # Verify the settings list still renders without error (UI uses DaisyUI list, not table)
-      assert has_element?(view, "ul.list")
+      # Verify the settings list still renders without error
+      assert has_element?(view, "div.bg-base-200.rounded-box")
     end
 
     test "toggles crash reporting setting without category validation error", %{
