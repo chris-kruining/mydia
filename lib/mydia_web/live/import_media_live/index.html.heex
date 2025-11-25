@@ -33,10 +33,10 @@
     <% end %>
 
     <%!-- Step 3: Review Matches --%>
-    <%= if @step == :review do %>
+    <%= if @step == :review and not @scanning and not @matching do %>
       <div>
         <%!-- Stats --%>
-        <Components.review_stats scan_stats={@scan_stats} selected_files={@selected_files} />
+        <Components.review_stats scan_stats={@scan_stats} />
 
         <%!-- Selection Controls --%>
         <Components.selection_controls selected_files={@selected_files} />
@@ -151,6 +151,56 @@
                   />
                 <% end %>
               </ul>
+            </div>
+          <% end %>
+
+          <%!-- Type Filtered Files (Collapsed by default) --%>
+          <%= if @grouped_files[:type_filtered] && @grouped_files.type_filtered != [] do %>
+            <div class="bg-base-100 rounded-lg shadow border border-base-300">
+              <div class="bg-info/10 px-4 py-2 border-b border-base-300">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-bold text-base text-info">
+                      <.icon name="hero-funnel" class="w-4 h-4 inline" /> Filtered (Type Mismatch)
+                    </h3>
+                    <span class="badge badge-info badge-sm">
+                      {length(@grouped_files.type_filtered)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-xs btn-ghost"
+                    phx-click="toggle_type_filtered"
+                  >
+                    <%= if @show_type_filtered do %>
+                      <.icon name="hero-chevron-up" class="w-4 h-4" /> Hide
+                    <% else %>
+                      <.icon name="hero-chevron-down" class="w-4 h-4" /> Show
+                    <% end %>
+                  </button>
+                </div>
+                <p class="text-xs text-base-content/60 mt-1">
+                  <%= if @selected_library_path && @selected_library_path.type == :series do %>
+                    These files appear to be movies but the library is configured for TV series only.
+                  <% else %>
+                    <%= if @selected_library_path && @selected_library_path.type == :movies do %>
+                      These files appear to be TV shows but the library is configured for movies only.
+                    <% else %>
+                      These files don't match the library type and cannot be imported.
+                    <% end %>
+                  <% end %>
+                </p>
+              </div>
+              <%= if @show_type_filtered do %>
+                <ul class="divide-y divide-base-300">
+                  <%= for file <- @grouped_files.type_filtered do %>
+                    <Components.type_filtered_list_item
+                      file={file}
+                      library_type={@selected_library_path && @selected_library_path.type}
+                    />
+                  <% end %>
+                </ul>
+              <% end %>
             </div>
           <% end %>
         </div>

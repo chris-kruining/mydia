@@ -17,14 +17,22 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     |> assign(:import_session, nil)
     |> assign(:step, :select_path)
     |> assign(:scan_path, "")
+    |> assign(:selected_library_path, nil)
     |> assign(:scanning, false)
     |> assign(:matching, false)
     |> assign(:importing, false)
     |> assign(:discovered_files, [])
     |> assign(:matched_files, [])
-    |> assign(:grouped_files, %{series: [], movies: [], ungrouped: []})
+    |> assign(:grouped_files, %{series: [], movies: [], ungrouped: [], type_filtered: []})
     |> assign(:selected_files, MapSet.new())
-    |> assign(:scan_stats, %{total: 0, matched: 0, unmatched: 0, skipped: 0, orphaned: 0})
+    |> assign(:scan_stats, %{
+      total: 0,
+      matched: 0,
+      unmatched: 0,
+      skipped: 0,
+      orphaned: 0,
+      type_filtered: 0
+    })
     |> assign(:library_paths, Settings.list_library_paths())
     |> assign(:metadata_config, Metadata.default_relay_config())
     |> assign(:import_progress, %{current: 0, total: 0, current_file: nil})
@@ -36,6 +44,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     |> assign(:search_results, [])
     |> assign(:path_suggestions, [])
     |> assign(:show_path_suggestions, false)
+    |> assign(:show_type_filtered, false)
   end
 
   @impl true
@@ -75,6 +84,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         {:noreply,
          socket
          |> assign(:scan_path, library_path.path)
+         |> assign(:selected_library_path, library_path)
          |> assign(:scanning, true)
          |> assign(:step, :review)
          |> assign(:discovered_files, [])
@@ -196,20 +206,33 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       |> assign(:import_session, nil)
       |> assign(:step, :select_path)
       |> assign(:scan_path, "")
+      |> assign(:selected_library_path, nil)
       |> assign(:discovered_files, [])
       |> assign(:matched_files, [])
-      |> assign(:grouped_files, %{series: [], movies: [], ungrouped: []})
+      |> assign(:grouped_files, %{series: [], movies: [], ungrouped: [], type_filtered: []})
       |> assign(:selected_files, MapSet.new())
-      |> assign(:scan_stats, %{total: 0, matched: 0, unmatched: 0, skipped: 0, orphaned: 0})
+      |> assign(:scan_stats, %{
+        total: 0,
+        matched: 0,
+        unmatched: 0,
+        skipped: 0,
+        orphaned: 0,
+        type_filtered: 0
+      })
       |> assign(:import_progress, %{current: 0, total: 0, current_file: nil})
       |> assign(:import_results, %{success: 0, failed: 0, skipped: 0})
       |> assign(:detailed_results, [])
+      |> assign(:show_type_filtered, false)
 
     {:noreply, socket}
   end
 
   def handle_event("cancel", _params, socket) do
     {:noreply, push_navigate(socket, to: ~p"/media")}
+  end
+
+  def handle_event("toggle_type_filtered", _params, socket) do
+    {:noreply, assign(socket, :show_type_filtered, !socket.assigns.show_type_filtered)}
   end
 
   def handle_event("edit_file", %{"index" => index_str}, socket) do
@@ -650,6 +673,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   end
 
   def handle_info({:match_files, files}, socket) do
+    library_path = socket.assigns.selected_library_path
+
     # Match files with TMDB in batches for better UX
     matched_files =
       Enum.map(files, fn file ->
@@ -666,16 +691,24 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         }
       end)
 
+    # Filter out files whose media type doesn't match the library type
+    {compatible_files, type_filtered_files} =
+      filter_by_library_type(matched_files, library_path)
+
     # Calculate stats
-    matched_count = Enum.count(matched_files, &(&1.match_result != nil))
-    unmatched_count = length(matched_files) - matched_count
+    matched_count = Enum.count(compatible_files, &(&1.match_result != nil))
+    unmatched_count = length(compatible_files) - matched_count
+    type_filtered_count = length(type_filtered_files)
 
-    # Group files hierarchically
-    grouped_files = FileGrouper.group_files(matched_files)
+    # Group files hierarchically (only compatible files)
+    grouped_files =
+      compatible_files
+      |> FileGrouper.group_files()
+      |> Map.put(:type_filtered, type_filtered_files)
 
-    # Auto-select files with high confidence matches
+    # Auto-select files with high confidence matches (using indices in matched_files for consistency)
     auto_selected =
-      matched_files
+      compatible_files
       |> Enum.with_index()
       |> Enum.filter(fn {file, _idx} ->
         file.match_result != nil && file.match_result.match_confidence >= 0.8
@@ -687,14 +720,15 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       socket
       |> assign(:matching, false)
       |> assign(:step, :review)
-      |> assign(:matched_files, matched_files)
+      |> assign(:matched_files, compatible_files)
       |> assign(:grouped_files, grouped_files)
       |> assign(:selected_files, auto_selected)
       |> assign(:scan_stats, %{
         total: length(files),
         matched: matched_count,
         unmatched: unmatched_count,
-        skipped: socket.assigns.scan_stats.skipped
+        skipped: socket.assigns.scan_stats.skipped,
+        type_filtered: type_filtered_count
       })
       |> persist_session()
 
@@ -749,16 +783,62 @@ defmodule MydiaWeb.ImportMediaLive.Index do
      })}
   end
 
+  ## Library Type Filtering
+
+  # Filters files by library type compatibility
+  # Returns {compatible_files, type_filtered_files}
+  defp filter_by_library_type(matched_files, nil), do: {matched_files, []}
+
+  defp filter_by_library_type(matched_files, library_path) do
+    case library_path.type do
+      :mixed ->
+        # Mixed libraries accept all media types
+        {matched_files, []}
+
+      :series ->
+        # Series-only library: filter out movies
+        Enum.split_with(matched_files, fn matched_file ->
+          case matched_file.match_result do
+            nil -> true
+            match -> match.parsed_info.type != :movie
+          end
+        end)
+
+      :movies ->
+        # Movies-only library: filter out TV shows
+        Enum.split_with(matched_files, fn matched_file ->
+          case matched_file.match_result do
+            nil -> true
+            match -> match.parsed_info.type != :tv_show
+          end
+        end)
+
+      _ ->
+        # Unknown library type, don't filter
+        {matched_files, []}
+    end
+  end
+
   ## Session Management
 
   defp restore_session(socket, session) do
     session_data = session.session_data || %{}
+    library_paths = Settings.list_library_paths()
+
+    # Restore the selected library path from the scan_path
+    selected_library_path =
+      if session.scan_path do
+        Enum.find(library_paths, fn lp -> lp.path == session.scan_path end)
+      else
+        nil
+      end
 
     socket
     |> assign(:page_title, "Import Media")
     |> assign(:import_session, session)
     |> assign(:step, session.step)
     |> assign(:scan_path, session.scan_path || "")
+    |> assign(:selected_library_path, selected_library_path)
     |> assign(:scanning, false)
     |> assign(:matching, false)
     |> assign(:importing, session.step == :importing)
@@ -772,7 +852,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       Map.get(
         session_data,
         "grouped_files",
-        %{"series" => [], "movies" => [], "ungrouped" => []}
+        %{"series" => [], "movies" => [], "ungrouped" => [], "type_filtered" => []}
       )
       |> atomize_grouped_files()
     )
@@ -785,10 +865,10 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       if session.scan_stats && session.scan_stats != %{} do
         atomize_keys(session.scan_stats)
       else
-        %{total: 0, matched: 0, unmatched: 0, skipped: 0, orphaned: 0}
+        %{total: 0, matched: 0, unmatched: 0, skipped: 0, orphaned: 0, type_filtered: 0}
       end
     )
-    |> assign(:library_paths, Settings.list_library_paths())
+    |> assign(:library_paths, library_paths)
     |> assign(:metadata_config, Metadata.default_relay_config())
     |> assign(
       :import_progress,
@@ -817,6 +897,7 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     |> assign(:search_results, [])
     |> assign(:path_suggestions, [])
     |> assign(:show_path_suggestions, false)
+    |> assign(:show_type_filtered, false)
   end
 
   defp persist_session(socket) do
@@ -885,7 +966,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     %{
       "series" => Enum.map(grouped_files.series || [], &to_storable_map/1),
       "movies" => Enum.map(grouped_files.movies || [], &to_storable_map/1),
-      "ungrouped" => Enum.map(grouped_files.ungrouped || [], &to_storable_map/1)
+      "ungrouped" => Enum.map(grouped_files.ungrouped || [], &to_storable_map/1),
+      "type_filtered" => Enum.map(grouped_files[:type_filtered] || [], &to_storable_map/1)
     }
   end
 
@@ -969,7 +1051,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     %{
       series: atomize_keys(Map.get(grouped, "series", [])),
       movies: atomize_keys(Map.get(grouped, "movies", [])),
-      ungrouped: atomize_keys(Map.get(grouped, "ungrouped", []))
+      ungrouped: atomize_keys(Map.get(grouped, "ungrouped", [])),
+      type_filtered: restore_matched_files(Map.get(grouped, "type_filtered", []))
     }
   end
 

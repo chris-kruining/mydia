@@ -47,47 +47,109 @@ defmodule MydiaWeb.ImportMediaLive.Components do
 
   def path_selection_screen(assigns) do
     ~H"""
-    <div class="card bg-base-100 shadow-xl">
-      <div class="card-body">
-        <h2 class="card-title">Select Directory to Scan</h2>
-        <p class="text-sm text-base-content/70 mb-3">
-          Choose from your configured library paths to begin scanning for media files.
+    <div class="flex flex-col items-center">
+      <%!-- Hero Section --%>
+      <div class="text-center mb-8">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
+          <.icon name="hero-folder-open" class="w-8 h-8 text-primary" />
+        </div>
+        <h2 class="text-xl font-bold mb-2">Select a Library to Scan</h2>
+        <p class="text-sm text-base-content/60 max-w-md">
+          Choose one of your configured library paths to discover and import media files.
         </p>
-
-        <%!-- Library Paths --%>
-        <%= if @library_paths != [] do %>
-          <div class="bg-primary/5 rounded-lg p-3">
-            <div class="flex items-center gap-2 mb-2">
-              <.icon name="hero-folder-open" class="w-4 h-4 text-primary" />
-              <span class="text-sm font-medium text-primary">Library Paths</span>
-            </div>
-            <div class="flex flex-col gap-1.5">
-              <%= for path <- @library_paths do %>
-                <button
-                  type="button"
-                  class="btn btn-sm btn-outline justify-start hover:btn-primary"
-                  phx-click="select_library_path"
-                  phx-value-path_id={path.id}
-                >
-                  <.icon name="hero-folder" class="w-4 h-4" />
-                  <span class="flex-1 text-left font-mono text-xs">{path.path}</span>
-                  <span class="badge badge-primary badge-sm">{path.type}</span>
-                </button>
-              <% end %>
-            </div>
-          </div>
-        <% else %>
-          <div class="alert alert-warning">
-            <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
-            <span>
-              No library paths configured. Please add a library path in Settings to begin importing media.
-            </span>
-          </div>
-        <% end %>
       </div>
+
+      <%!-- Library Paths Grid --%>
+      <%= if @library_paths != [] do %>
+        <div class="grid gap-3 w-full max-w-2xl">
+          <%= for path <- @library_paths do %>
+            <button
+              type="button"
+              class="group card card-compact bg-base-100 border border-base-300 hover:border-primary hover:shadow-lg transition-all duration-200 cursor-pointer text-left"
+              phx-click="select_library_path"
+              phx-value-path_id={path.id}
+            >
+              <div class="card-body flex-row items-center gap-4">
+                <%!-- Icon based on library type --%>
+                <div class={[
+                  "flex items-center justify-center w-12 h-12 rounded-lg transition-colors",
+                  library_type_bg_class(path.type),
+                  "group-hover:scale-105 transition-transform"
+                ]}>
+                  <.icon name={library_type_icon(path.type)} class="w-6 h-6" />
+                </div>
+
+                <%!-- Path info --%>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class={[
+                      "badge badge-sm",
+                      library_type_badge_class(path.type)
+                    ]}>
+                      {library_type_display(path.type)}
+                    </span>
+                  </div>
+                  <p class="font-mono text-sm truncate text-base-content/80 group-hover:text-base-content">
+                    {path.path}
+                  </p>
+                </div>
+
+                <%!-- Arrow indicator --%>
+                <div class="text-base-content/30 group-hover:text-primary group-hover:translate-x-1 transition-all">
+                  <.icon name="hero-chevron-right" class="w-5 h-5" />
+                </div>
+              </div>
+            </button>
+          <% end %>
+        </div>
+
+        <%!-- Hint --%>
+        <p class="text-xs text-base-content/50 mt-6 text-center">
+          <.icon name="hero-information-circle" class="w-4 h-4 inline -mt-0.5" />
+          Need to add more paths? Configure them in
+          <a href="/settings/library" class="link link-primary">Library Settings</a>
+        </p>
+      <% else %>
+        <%!-- Empty State --%>
+        <div class="card bg-base-200/50 border border-dashed border-base-300 w-full max-w-md">
+          <div class="card-body items-center text-center py-12">
+            <div class="w-16 h-16 rounded-full bg-warning/10 flex items-center justify-center mb-4">
+              <.icon name="hero-folder-plus" class="w-8 h-8 text-warning" />
+            </div>
+            <h3 class="font-semibold text-lg mb-2">No Library Paths Configured</h3>
+            <p class="text-sm text-base-content/60 mb-4">
+              Add a library path in Settings to start importing your media files.
+            </p>
+            <a href="/settings/library" class="btn btn-primary btn-sm gap-2">
+              <.icon name="hero-cog-6-tooth" class="w-4 h-4" /> Go to Settings
+            </a>
+          </div>
+        </div>
+      <% end %>
     </div>
     """
   end
+
+  # Helper functions for library type styling
+  defp library_type_icon(:series), do: "hero-tv"
+  defp library_type_icon(:movies), do: "hero-film"
+  defp library_type_icon(:mixed), do: "hero-square-3-stack-3d"
+  defp library_type_icon(_), do: "hero-folder"
+
+  defp library_type_bg_class(:series), do: "bg-info/10 text-info"
+  defp library_type_bg_class(:movies), do: "bg-accent/10 text-accent"
+  defp library_type_bg_class(:mixed), do: "bg-secondary/10 text-secondary"
+  defp library_type_bg_class(_), do: "bg-base-200 text-base-content/70"
+
+  defp library_type_badge_class(:series), do: "badge-info"
+  defp library_type_badge_class(:movies), do: "badge-accent"
+  defp library_type_badge_class(:mixed), do: "badge-secondary"
+  defp library_type_badge_class(_), do: "badge-ghost"
+
+  defp library_type_display(:series), do: "TV Series"
+  defp library_type_display(:movies), do: "Movies"
+  defp library_type_display(:mixed), do: "Mixed"
+  defp library_type_display(type), do: to_string(type)
 
   @doc """
   Renders the scanning/matching progress indicator.
@@ -103,46 +165,90 @@ defmodule MydiaWeb.ImportMediaLive.Components do
 
   def scanning_progress(assigns) do
     ~H"""
-    <div class="card bg-base-100 shadow-xl">
-      <div class="card-body items-center text-center">
-        <span class="loading loading-spinner loading-lg text-primary"></span>
-        <h2 class="card-title mt-4">
-          {if(@scanning, do: "Scanning Directory", else: "Matching Files")}
-        </h2>
-        <p class="text-base-content/70">
-          {if(@scanning,
-            do: "Discovering media files...",
-            else: "Matching discovered files with TMDB metadata..."
-          )}
-        </p>
-        <%= if @matching do %>
-          <p class="text-sm text-base-content/50 mt-2">
-            Found {@scan_stats.total} new files
-          </p>
-        <% end %>
-        <%= if @scan_stats.skipped > 0 do %>
-          <div class="alert alert-info mt-4 max-w-md">
-            <.icon name="hero-information-circle" class="w-5 h-5" />
-            <span class="text-sm">
-              Skipped {@scan_stats.skipped} {if(@scan_stats.skipped == 1,
-                do: "file",
-                else: "files"
-              )} already in your library
-            </span>
-          </div>
-        <% end %>
-        <%= if @scan_stats[:orphaned] && @scan_stats.orphaned > 0 do %>
-          <div class="alert alert-warning mt-4 max-w-md">
-            <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
-            <span class="text-sm">
-              Found {@scan_stats.orphaned} orphaned {if(@scan_stats.orphaned == 1,
-                do: "file",
-                else: "files"
-              )} that will be re-matched
-            </span>
-          </div>
-        <% end %>
+    <div class="flex flex-col items-center py-8">
+      <%!-- Animated Icon Container --%>
+      <div class="relative mb-6">
+        <%!-- Pulsing background ring --%>
+        <div class={[
+          "absolute inset-0 rounded-full animate-ping opacity-20",
+          if(@scanning, do: "bg-primary", else: "bg-secondary")
+        ]}>
+        </div>
+        <%!-- Icon container --%>
+        <div class={[
+          "relative flex items-center justify-center w-20 h-20 rounded-full",
+          if(@scanning, do: "bg-primary/10", else: "bg-secondary/10")
+        ]}>
+          <%= if @scanning do %>
+            <.icon name="hero-magnifying-glass" class="w-10 h-10 text-primary animate-pulse" />
+          <% else %>
+            <.icon name="hero-sparkles" class="w-10 h-10 text-secondary animate-pulse" />
+          <% end %>
+        </div>
       </div>
+
+      <%!-- Title and description --%>
+      <h2 class="text-xl font-bold mb-2">
+        {if(@scanning, do: "Scanning Directory", else: "Matching Files")}
+      </h2>
+      <p class="text-sm text-base-content/60 max-w-md text-center mb-6">
+        {if(@scanning,
+          do: "Discovering media files in the selected directory...",
+          else: "Looking up metadata from TMDB for your media files..."
+        )}
+      </p>
+
+      <%!-- Progress indicator --%>
+      <div class="flex items-center gap-2 text-base-content/50 mb-8">
+        <span class="loading loading-dots loading-sm"></span>
+        <span class="text-sm">
+          {if(@scanning, do: "Scanning in progress", else: "Matching in progress")}
+        </span>
+      </div>
+
+      <%!-- Stats cards during matching phase --%>
+      <%= if @matching do %>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
+          <%!-- New Files Card --%>
+          <div class="card bg-base-100 border border-base-300 shadow-sm">
+            <div class="card-body p-4 items-center text-center">
+              <div class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center mb-2">
+                <.icon name="hero-document-text" class="w-5 h-5 text-primary" />
+              </div>
+              <div class="text-3xl font-bold text-primary">{@scan_stats.total}</div>
+              <div class="text-xs text-base-content/60">New files to match</div>
+            </div>
+          </div>
+
+          <%!-- Skipped Files Card --%>
+          <%= if @scan_stats.skipped > 0 do %>
+            <div class="card bg-base-100 border border-base-300 shadow-sm">
+              <div class="card-body p-4 items-center text-center">
+                <div class="w-10 h-10 rounded-full bg-base-200 flex items-center justify-center mb-2">
+                  <.icon name="hero-check-circle" class="w-5 h-5 text-base-content/50" />
+                </div>
+                <div class="text-3xl font-bold text-base-content/50">{@scan_stats.skipped}</div>
+                <div class="text-xs text-base-content/60">Already imported</div>
+              </div>
+            </div>
+          <% else %>
+            <div class="card bg-base-100 border border-base-300 shadow-sm">
+              <div class="card-body p-4 items-center text-center">
+                <div class="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center mb-2">
+                  <.icon name="hero-check-circle" class="w-5 h-5 text-success" />
+                </div>
+                <div class="text-3xl font-bold text-success">0</div>
+                <div class="text-xs text-base-content/60">Duplicates found</div>
+              </div>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Subtle hint --%>
+        <p class="text-xs text-base-content/40 mt-6 text-center">
+          This may take a moment depending on the number of files
+        </p>
+      <% end %>
     </div>
     """
   end
@@ -190,37 +296,40 @@ defmodule MydiaWeb.ImportMediaLive.Components do
   Renders the stats cards for the review screen.
 
   ## Attributes
-    * `:scan_stats` - Map with `:total`, `:matched`, `:unmatched`, `:skipped`, `:orphaned`
-    * `:selected_files` - MapSet of selected file indices
+    * `:scan_stats` - Map with `:total`, `:matched`, `:unmatched`, `:skipped`, `:orphaned`, `:type_filtered`
   """
   attr :scan_stats, :map, required: true
-  attr :selected_files, :any, required: true
 
   def review_stats(assigns) do
     ~H"""
-    <div class="stats stats-vertical sm:stats-horizontal shadow w-full mb-3 text-xs">
-      <div class="stat py-2 px-3">
-        <div class="stat-title text-[10px]">New Files</div>
+    <div class="stats stats-vertical sm:stats-horizontal shadow-md w-full mb-3 bg-base-100 border border-base-300">
+      <div class="stat py-2 px-4">
+        <div class="stat-title text-xs">Discovered</div>
         <div class="stat-value text-lg text-primary">{@scan_stats.total}</div>
+        <div class="stat-desc text-[10px]">new files</div>
       </div>
-      <div class="stat py-2 px-3">
-        <div class="stat-title text-[10px]">Matched</div>
+
+      <div class="stat py-2 px-4">
+        <div class="stat-title text-xs">Matched</div>
         <div class="stat-value text-lg text-success">{@scan_stats.matched}</div>
+        <div class="stat-desc text-[10px]">metadata found</div>
       </div>
-      <div class="stat py-2 px-3">
-        <div class="stat-title text-[10px]">Unmatched</div>
-        <div class="stat-value text-lg text-warning">{@scan_stats.unmatched}</div>
-      </div>
-      <%= if @scan_stats.skipped > 0 do %>
-        <div class="stat py-2 px-3">
-          <div class="stat-title text-[10px]">Skipped</div>
-          <div class="stat-value text-lg text-base-content/50">{@scan_stats.skipped}</div>
+
+      <%= if @scan_stats.unmatched > 0 do %>
+        <div class="stat py-2 px-4">
+          <div class="stat-title text-xs">Unmatched</div>
+          <div class="stat-value text-lg text-warning">{@scan_stats.unmatched}</div>
+          <div class="stat-desc text-[10px]">need manual match</div>
         </div>
       <% end %>
-      <div class="stat py-2 px-3">
-        <div class="stat-title text-[10px]">Selected</div>
-        <div class="stat-value text-lg">{MapSet.size(@selected_files)}</div>
-      </div>
+
+      <%= if @scan_stats[:type_filtered] && @scan_stats.type_filtered > 0 do %>
+        <div class="stat py-2 px-4">
+          <div class="stat-title text-xs">Filtered</div>
+          <div class="stat-value text-lg text-info">{@scan_stats.type_filtered}</div>
+          <div class="stat-desc text-[10px]">type mismatch</div>
+        </div>
+      <% end %>
     </div>
     """
   end
@@ -235,12 +344,18 @@ defmodule MydiaWeb.ImportMediaLive.Components do
 
   def selection_controls(assigns) do
     ~H"""
-    <div class="flex items-center justify-between mb-3">
+    <%!-- In-flow toolbar (always visible at normal position) --%>
+    <div
+      id="selection-toolbar"
+      phx-hook="StickyToolbar"
+      data-fixed-id="selection-toolbar-fixed"
+      class="flex items-center justify-between mb-3"
+    >
       <div class="flex gap-2">
-        <button type="button" class="btn btn-xs btn-outline" phx-click="select_all_files">
-          Select All Matched
+        <button type="button" class="btn btn-sm btn-outline" phx-click="select_all_files">
+          Select All
         </button>
-        <button type="button" class="btn btn-xs btn-outline" phx-click="deselect_all_files">
+        <button type="button" class="btn btn-sm btn-outline" phx-click="deselect_all_files">
           Deselect All
         </button>
       </div>
@@ -250,9 +365,34 @@ defmodule MydiaWeb.ImportMediaLive.Components do
         phx-click="start_import"
         disabled={MapSet.size(@selected_files) == 0}
       >
-        <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
-        Import Selected ({MapSet.size(@selected_files)})
+        <.icon name="hero-arrow-down-tray" class="w-4 h-4" /> Import ({MapSet.size(@selected_files)})
       </button>
+    </div>
+
+    <%!-- Fixed toolbar (hidden by default, shown when scrolling past in-flow toolbar) --%>
+    <div
+      id="selection-toolbar-fixed"
+      class="hidden fixed top-14 lg:top-0 left-0 lg:left-64 right-0 z-20 bg-base-100 border-b border-base-300 shadow-sm px-4 py-2"
+    >
+      <div class="flex items-center justify-between max-w-7xl mx-auto">
+        <div class="flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline" phx-click="select_all_files">
+            Select All
+          </button>
+          <button type="button" class="btn btn-sm btn-outline" phx-click="deselect_all_files">
+            Deselect All
+          </button>
+        </div>
+        <button
+          type="button"
+          class="btn btn-sm btn-primary"
+          phx-click="start_import"
+          disabled={MapSet.size(@selected_files) == 0}
+        >
+          <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+          Import ({MapSet.size(@selected_files)})
+        </button>
+      </div>
     </div>
     """
   end
@@ -771,6 +911,53 @@ defmodule MydiaWeb.ImportMediaLive.Components do
   end
 
   @doc """
+  Renders a type-filtered file as a compact list item.
+  These are files that were filtered out due to library type mismatch
+  (e.g., movies in a TV-only library).
+
+  ## Attributes
+    * `:file` - File data with `:file`, `:match_result`
+    * `:library_type` - The type of the library being scanned (:series, :movies, :mixed)
+  """
+  attr :file, :map, required: true
+  attr :library_type, :atom, default: nil
+
+  def type_filtered_list_item(assigns) do
+    ~H"""
+    <li class="flex items-center gap-3 py-2 px-3 hover:bg-base-200/50 rounded-lg opacity-60">
+      <div class="text-info mt-1">
+        <.icon name="hero-funnel" class="w-4 h-4" />
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex-1 min-w-0">
+            <p class="font-medium text-sm truncate">
+              {Path.basename(@file.file.path)}
+            </p>
+            <%= if @file.match_result do %>
+              <p class="text-xs text-base-content/60 truncate">
+                {type_mismatch_reason(@file.match_result, @library_type)}
+              </p>
+            <% end %>
+            <p class="text-xs text-base-content/50">
+              {format_file_size(@file.file.size)}
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <%= if @file.match_result do %>
+              <div class={"badge badge-xs " <> media_type_badge_class(@file.match_result.parsed_info.type)}>
+                {media_type_label(@file.match_result.parsed_info.type)}
+              </div>
+            <% end %>
+            <div class="badge badge-xs badge-info">Filtered</div>
+          </div>
+        </div>
+      </div>
+    </li>
+    """
+  end
+
+  @doc """
   Renders a search results dropdown (compact version).
 
   ## Attributes
@@ -856,50 +1043,49 @@ defmodule MydiaWeb.ImportMediaLive.Components do
   def import_complete_screen(assigns) do
     ~H"""
     <div class="mb-6">
-      <%!-- Header --%>
-      <div class="card bg-base-100 shadow-xl mb-6">
-        <div class="card-body items-center text-center">
-          <div class={"text-" <> if(@import_results.failed == 0, do: "success", else: "warning")}>
-            <.icon
-              name={
-                if(@import_results.failed == 0,
-                  do: "hero-check-circle",
-                  else: "hero-exclamation-triangle"
-                )
-              }
-              class="w-24 h-24"
-            />
+      <%!-- Summary Stats with Header --%>
+      <div class="stats stats-vertical sm:stats-horizontal shadow-md w-full mb-4 bg-base-100 border border-base-300">
+        <div class="stat">
+          <div class="stat-figure">
+            <div class={if(@import_results.failed == 0, do: "text-success", else: "text-warning")}>
+              <.icon
+                name={
+                  if(@import_results.failed == 0,
+                    do: "hero-check-circle",
+                    else: "hero-exclamation-triangle"
+                  )
+                }
+                class="w-8 h-8"
+              />
+            </div>
           </div>
-          <h2 class="card-title text-2xl mt-4">Import Complete!</h2>
-          <p class="text-base-content/60">
-            {@import_results.success + @import_results.failed + @import_results.skipped} items processed
-          </p>
-        </div>
-      </div>
-
-      <%!-- Summary Stats --%>
-      <div class="stats stats-horizontal shadow w-full mb-6">
-        <div class="stat">
-          <div class="stat-title">Successfully Imported</div>
-          <div class="stat-value text-success">{@import_results.success}</div>
-          <div class="stat-desc">Items added to library</div>
+          <div class="stat-title text-xs">Total Processed</div>
+          <div class="stat-value text-lg">
+            {@import_results.success + @import_results.failed + @import_results.skipped}
+          </div>
+          <div class="stat-desc text-xs">Import complete</div>
         </div>
         <div class="stat">
-          <div class="stat-title">Failed</div>
-          <div class="stat-value text-error">{@import_results.failed}</div>
-          <div class="stat-desc">Items with errors</div>
+          <div class="stat-title text-xs">Imported</div>
+          <div class="stat-value text-lg text-success">{@import_results.success}</div>
+          <div class="stat-desc text-xs">added to library</div>
+        </div>
+        <div class="stat">
+          <div class="stat-title text-xs">Failed</div>
+          <div class="stat-value text-lg text-error">{@import_results.failed}</div>
+          <div class="stat-desc text-xs">with errors</div>
         </div>
         <%= if @import_results.skipped > 0 do %>
           <div class="stat">
-            <div class="stat-title">Skipped</div>
-            <div class="stat-value text-base-content/50">{@import_results.skipped}</div>
-            <div class="stat-desc">Items skipped</div>
+            <div class="stat-title text-xs">Skipped</div>
+            <div class="stat-value text-lg text-base-content/50">{@import_results.skipped}</div>
+            <div class="stat-desc text-xs">items skipped</div>
           </div>
         <% end %>
       </div>
 
       <%!-- Action Buttons --%>
-      <div class="flex items-center justify-between mb-6">
+      <div class="flex items-center justify-between mb-4">
         <div class="flex gap-2">
           <%= if @import_results.failed > 0 do %>
             <button type="button" class="btn btn-warning btn-sm" phx-click="retry_all_failed">
@@ -1052,4 +1238,25 @@ defmodule MydiaWeb.ImportMediaLive.Components do
   defp confidence_label(confidence) when confidence >= 0.8, do: "High"
   defp confidence_label(confidence) when confidence >= 0.5, do: "Medium"
   defp confidence_label(_), do: "Low"
+
+  defp media_type_badge_class(:movie), do: "badge-accent"
+  defp media_type_badge_class(:tv_show), do: "badge-info"
+  defp media_type_badge_class(_), do: "badge-ghost"
+
+  defp media_type_label(:movie), do: "Movie"
+  defp media_type_label(:tv_show), do: "TV Show"
+  defp media_type_label(_), do: "Unknown"
+
+  defp type_mismatch_reason(match_result, :series) when match_result.parsed_info.type == :movie do
+    "Movie detected in TV series library: \"#{match_result.title}\""
+  end
+
+  defp type_mismatch_reason(match_result, :movies)
+       when match_result.parsed_info.type == :tv_show do
+    "TV show detected in movies library: \"#{match_result.title}\""
+  end
+
+  defp type_mismatch_reason(match_result, _library_type) do
+    "Type mismatch: \"#{match_result.title}\" (#{media_type_label(match_result.parsed_info.type)})"
+  end
 end

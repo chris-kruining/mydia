@@ -147,6 +147,63 @@ const DownloadFile = {
   },
 };
 
+// Sticky toolbar hook - shows fixed toolbar when original scrolls out of view
+const StickyToolbar = {
+  mounted() {
+    this.fixedToolbarId = this.el.dataset.fixedId;
+    this.isSticky = false;
+
+    this.setupObserver();
+  },
+
+  updated() {
+    // Re-apply visibility state after LiveView updates the DOM
+    this.applyVisibility();
+  },
+
+  setupObserver() {
+    const fixedToolbar = document.getElementById(this.fixedToolbarId);
+    if (!fixedToolbar) {
+      console.warn("StickyToolbar: fixed toolbar not found:", this.fixedToolbarId);
+      return;
+    }
+
+    // Use viewport as root (null) for simpler intersection detection
+    this.observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          this.isSticky = !entry.isIntersecting;
+          this.applyVisibility();
+        });
+      },
+      {
+        root: null, // viewport
+        threshold: 0,
+        rootMargin: "-50px 0px 0px 0px", // trigger slightly before fully out of view
+      }
+    );
+
+    this.observer.observe(this.el);
+  },
+
+  applyVisibility() {
+    const fixedToolbar = document.getElementById(this.fixedToolbarId);
+    if (!fixedToolbar) return;
+
+    if (this.isSticky) {
+      fixedToolbar.classList.remove("hidden");
+    } else {
+      fixedToolbar.classList.add("hidden");
+    }
+  },
+
+  destroyed() {
+    if (this.observer) {
+      this.observer.disconnect();
+    }
+  },
+};
+
 // Initialize Alpine.js FIRST (before LiveView)
 window.Alpine = Alpine;
 
@@ -168,6 +225,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     VideoPlayer,
     PathAutocomplete,
     DownloadFile,
+    StickyToolbar,
   },
 });
 
