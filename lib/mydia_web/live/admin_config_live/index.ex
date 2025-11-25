@@ -1,30 +1,45 @@
 defmodule MydiaWeb.AdminConfigLive.Index do
   use MydiaWeb, :live_view
+  alias Mydia.DB
+  alias Mydia.Repo
   alias Mydia.Settings
   alias Mydia.Settings.{QualityProfile, DownloadClientConfig, IndexerConfig, LibraryPath}
   alias Mydia.Downloads.ClientHealth
   alias Mydia.Indexers.Health, as: IndexerHealth
+  alias Mydia.System
+  alias MydiaWeb.AdminConfigLive.Components
 
   require Logger
   alias Mydia.Logger, as: MydiaLogger
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket) do
+      # Refresh system data every 5 seconds for real-time updates
+      :timer.send_interval(5000, self(), :refresh_system_data)
+    end
+
     {:ok,
      socket
-     |> assign(:page_title, "Configuration Management")
-     |> assign(:active_tab, "general")
-     |> load_configuration_data()}
+     |> assign(:page_title, "Configuration")
+     |> assign(:active_tab, "status")
+     |> load_configuration_data()
+     |> load_system_data()}
   end
 
   @impl true
   def handle_params(params, _url, socket) do
-    tab = params["tab"] || "general"
+    tab = params["tab"] || "status"
 
     {:noreply,
      socket
      |> assign(:active_tab, tab)
      |> maybe_setup_form(tab)}
+  end
+
+  @impl true
+  def handle_info(:refresh_system_data, socket) do
+    {:noreply, load_system_data(socket)}
   end
 
   @impl true
@@ -179,7 +194,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      socket
      |> assign(:show_quality_profile_modal, true)
      |> assign(:quality_profile_form, to_form(changeset))
-     |> assign(:quality_profile_mode, :new)}
+     |> assign(:quality_profile_mode, :new)
+     |> assign(:quality_profile_active_tab, "basic")}
   end
 
   @impl true
@@ -192,7 +208,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
      |> assign(:show_quality_profile_modal, true)
      |> assign(:quality_profile_form, to_form(changeset))
      |> assign(:quality_profile_mode, :edit)
-     |> assign(:editing_quality_profile, profile)}
+     |> assign(:editing_quality_profile, profile)
+     |> assign(:quality_profile_active_tab, "basic")}
   end
 
   @impl true
@@ -248,24 +265,15 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   def handle_event("duplicate_quality_profile", %{"id" => id}, socket) do
     profile = Settings.get_quality_profile!(id)
 
-    # Create a new profile with duplicated attributes
-    duplicate_attrs = %{
-      name: "#{profile.name} (Copy)",
-      qualities: profile.qualities,
-      upgrades_allowed: profile.upgrades_allowed,
-      upgrade_until_quality: profile.upgrade_until_quality,
-      rules: profile.rules
-    }
-
-    case Settings.create_quality_profile(duplicate_attrs) do
+    case Settings.clone_quality_profile(profile) do
       {:ok, _new_profile} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Quality profile duplicated successfully")
+         |> put_flash(:info, "Quality profile cloned successfully")
          |> load_configuration_data()}
 
       {:error, changeset} ->
-        MydiaLogger.log_error(:liveview, "Failed to duplicate quality profile",
+        MydiaLogger.log_error(:liveview, "Failed to clone quality profile",
           error: changeset,
           operation: :duplicate_quality_profile,
           profile_id: id,
@@ -326,6 +334,77 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   @impl true
   def handle_event("close_quality_profile_modal", _params, socket) do
     {:noreply, assign(socket, :show_quality_profile_modal, false)}
+  end
+
+  @impl true
+  def handle_event("change_quality_profile_tab", %{"tab" => tab}, socket) do
+    {:noreply, assign(socket, :quality_profile_active_tab, tab)}
+  end
+
+  @impl true
+  def handle_event("export_quality_profile", %{"id" => id, "format" => format}, socket) do
+    profile = Settings.get_quality_profile!(id)
+    format_atom = String.to_existing_atom(format)
+
+    case Settings.export_profile(profile, format: format_atom) do
+      {:ok, content} ->
+        # Trigger file download via JavaScript
+        {:noreply,
+         socket
+         |> push_event("download_file", %{
+           content: content,
+           filename: "#{profile.name}.#{format}",
+           mime_type: get_export_mime_type(format_atom)
+         })}
+
+      {:error, reason} ->
+        {:noreply, socket |> put_flash(:error, "Export failed: #{reason}")}
+    end
+  end
+
+  @impl true
+  def handle_event("import_quality_profile_url", %{"url" => url}, socket) do
+    case Settings.import_profile(url, dry_run: false) do
+      {:ok, _profile} ->
+        {:noreply,
+         socket
+         |> assign(:show_import_modal, false)
+         |> assign(:import_error, nil)
+         |> put_flash(:info, "Profile imported successfully from URL")
+         |> load_configuration_data()}
+
+      {:error, reason} ->
+        MydiaLogger.log_error(:liveview, "Failed to import quality profile from URL",
+          error: reason,
+          operation: :import_quality_profile,
+          url: url,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg =
+          case reason do
+            msg when is_binary(msg) -> msg
+            _ -> "Failed to import profile: #{inspect(reason)}"
+          end
+
+        {:noreply, socket |> assign(:import_error, error_msg)}
+    end
+  end
+
+  @impl true
+  def handle_event("show_import_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_import_modal, true)
+     |> assign(:import_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_import_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_import_modal, false)
+     |> assign(:import_error, nil)}
   end
 
   ## Download Client Events
@@ -1052,6 +1131,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     |> assign(:show_indexer_modal, false)
     |> assign(:show_library_path_modal, false)
     |> assign(:show_manual_report_modal, false)
+    |> assign(:show_import_modal, false)
   end
 
   defp get_client_health_status(clients) do
@@ -1104,24 +1184,28 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{
           key: "server.port",
           label: "Port",
+          type: :integer,
           value: config.server.port,
           source: get_source("PORT", "server.port")
         },
         %{
           key: "server.host",
           label: "Host",
+          type: :string,
           value: config.server.host,
           source: get_source("HOST", "server.host")
         },
         %{
           key: "server.url_scheme",
           label: "URL Scheme",
+          type: :string,
           value: config.server.url_scheme,
           source: get_source("URL_SCHEME", "server.url_scheme")
         },
         %{
           key: "server.url_host",
           label: "URL Host",
+          type: :string,
           value: config.server.url_host,
           source: get_source("URL_HOST", "server.url_host")
         }
@@ -1130,12 +1214,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{
           key: "database.path",
           label: "Database Path",
+          type: :string,
           value: config.database.path,
           source: get_source("DATABASE_PATH", "database.path")
         },
         %{
           key: "database.pool_size",
           label: "Pool Size",
+          type: :integer,
           value: config.database.pool_size,
           source: get_source("POOL_SIZE", "database.pool_size")
         }
@@ -1144,12 +1230,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{
           key: "auth.local_enabled",
           label: "Local Auth Enabled",
+          type: :boolean,
           value: config.auth.local_enabled,
           source: get_source("LOCAL_AUTH_ENABLED", "auth.local_enabled")
         },
         %{
           key: "auth.oidc_enabled",
           label: "OIDC Enabled",
+          type: :boolean,
           value: config.auth.oidc_enabled,
           source: get_source("OIDC_ENABLED", "auth.oidc_enabled")
         }
@@ -1158,18 +1246,21 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{
           key: "media.movies_path",
           label: "Movies Path",
+          type: :string,
           value: config.media.movies_path,
           source: get_source("MOVIES_PATH", "media.movies_path")
         },
         %{
           key: "media.tv_path",
           label: "TV Path",
+          type: :string,
           value: config.media.tv_path,
           source: get_source("TV_PATH", "media.tv_path")
         },
         %{
           key: "media.scan_interval_hours",
           label: "Scan Interval (hours)",
+          type: :integer,
           value: config.media.scan_interval_hours,
           source: get_source("MEDIA_SCAN_INTERVAL_HOURS", "media.scan_interval_hours")
         }
@@ -1178,6 +1269,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{
           key: "downloads.monitor_interval_minutes",
           label: "Monitor Interval (minutes)",
+          type: :integer,
           value: config.downloads.monitor_interval_minutes,
           source:
             get_source("DOWNLOAD_MONITOR_INTERVAL_MINUTES", "downloads.monitor_interval_minutes")
@@ -1187,6 +1279,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         %{
           key: "crash_reporting.enabled",
           label: "Share Crashes with Developers",
+          type: :boolean,
           value: get_crash_reporting_enabled(),
           source: get_source("CRASH_REPORTING_ENABLED", "crash_reporting.enabled")
         }
@@ -1198,7 +1291,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     case Settings.get_config_setting_by_key("crash_reporting.enabled") do
       nil ->
         # Fall back to environment variable
-        case System.get_env("CRASH_REPORTING_ENABLED") do
+        case Elixir.System.get_env("CRASH_REPORTING_ENABLED") do
           nil -> false
           value -> parse_boolean_value(value)
         end
@@ -1217,7 +1310,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   defp get_source(env_var_name, key) do
     cond do
       # Check if set via environment variable
-      System.get_env(env_var_name) ->
+      Elixir.System.get_env(env_var_name) ->
         :env
 
       # Check if set in database
@@ -1325,100 +1418,8 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
-  defp source_badge_class(:env), do: "badge-primary"
-  defp source_badge_class(:database), do: "badge-info"
-  defp source_badge_class(:file), do: "badge-warning"
-  defp source_badge_class(:default), do: "badge-ghost"
-
-  defp source_label(:env), do: "ENV"
-  defp source_label(:database), do: "DB"
-  defp source_label(:file), do: "FILE"
-  defp source_label(:default), do: "DEFAULT"
-
-  defp source_description(:env),
-    do: "Set via environment variable (read-only in UI)"
-
-  defp source_description(:database), do: "Overridden via database/UI"
-  defp source_description(:file), do: "Set in config.yml file"
-  defp source_description(:default), do: "Using default value"
-
-  defp health_status_badge_class(:healthy), do: "badge-success"
-  defp health_status_badge_class(:unhealthy), do: "badge-error"
-  defp health_status_badge_class(:unknown), do: "badge-ghost"
-
-  defp health_status_icon(:healthy), do: "hero-check-circle"
-  defp health_status_icon(:unhealthy), do: "hero-x-circle"
-  defp health_status_icon(:unknown), do: "hero-question-mark-circle"
-
-  defp health_status_label(:healthy), do: "Healthy"
-  defp health_status_label(:unhealthy), do: "Unhealthy"
-  defp health_status_label(:unknown), do: "Unknown"
-
   # Transforms quality profile form params to match the schema structure
   defp transform_quality_profile_params(params) do
-    # Extract rules fields from params
-    rules = %{}
-
-    rules =
-      if params["rules"] do
-        # Parse min_size_mb
-        rules =
-          case params["rules"]["min_size_mb"] do
-            "" -> rules
-            nil -> rules
-            val when is_binary(val) -> Map.put(rules, "min_size_mb", String.to_integer(val))
-            val when is_integer(val) -> Map.put(rules, "min_size_mb", val)
-            _ -> rules
-          end
-
-        # Parse max_size_mb
-        rules =
-          case params["rules"]["max_size_mb"] do
-            "" -> rules
-            nil -> rules
-            val when is_binary(val) -> Map.put(rules, "max_size_mb", String.to_integer(val))
-            val when is_integer(val) -> Map.put(rules, "max_size_mb", val)
-            _ -> rules
-          end
-
-        # Parse preferred_sources (comma-separated string to array)
-        rules =
-          case params["rules"]["preferred_sources"] do
-            "" ->
-              rules
-
-            nil ->
-              rules
-
-            val when is_binary(val) ->
-              sources =
-                val
-                |> String.split(",")
-                |> Enum.map(&String.trim/1)
-                |> Enum.reject(&(&1 == ""))
-
-              Map.put(rules, "preferred_sources", sources)
-
-            val when is_list(val) ->
-              Map.put(rules, "preferred_sources", val)
-
-            _ ->
-              rules
-          end
-
-        # Add description
-        rules =
-          case params["rules"]["description"] do
-            "" -> rules
-            nil -> rules
-            val -> Map.put(rules, "description", val)
-          end
-
-        rules
-      else
-        rules
-      end
-
     # Handle qualities array - if empty or nil, set to empty list to satisfy validation
     qualities =
       case params["qualities"] do
@@ -1428,32 +1429,280 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         _ -> []
       end
 
+    # Extract and transform quality_standards
+    quality_standards =
+      if params["quality_standards"] do
+        transform_quality_standards(params["quality_standards"])
+      else
+        nil
+      end
+
+    # Extract and transform metadata_preferences
+    metadata_preferences =
+      if params["metadata_preferences"] do
+        transform_metadata_preferences(params["metadata_preferences"])
+      else
+        nil
+      end
+
     # Build the final params map
     %{
       "name" => params["name"],
+      "description" => params["description"],
       "qualities" => qualities,
       "upgrades_allowed" =>
         params["upgrades_allowed"] == "true" || params["upgrades_allowed"] == true,
       "upgrade_until_quality" => params["upgrade_until_quality"],
-      "rules" => rules
+      "quality_standards" => quality_standards,
+      "metadata_preferences" => metadata_preferences
     }
   end
 
-  defp format_indexer_type(type) when is_atom(type) do
-    type |> to_string() |> String.capitalize()
+  defp transform_quality_standards(standards) when is_map(standards) do
+    standards
+    |> Enum.reduce(%{}, fn {key, value}, acc ->
+      case transform_quality_standard_value(key, value) do
+        nil -> acc
+        transformed_value -> Map.put(acc, key, transformed_value)
+      end
+    end)
+    |> case do
+      empty when empty == %{} -> nil
+      non_empty -> non_empty
+    end
   end
 
-  defp format_indexer_type(type), do: to_string(type)
+  defp transform_quality_standard_value(_key, ""), do: nil
+  defp transform_quality_standard_value(_key, nil), do: nil
 
-  defp format_relative_time(monotonic_time) do
-    now = System.monotonic_time(:second)
-    diff = now - monotonic_time
+  defp transform_quality_standard_value(key, value)
+       when key in [
+              "min_video_bitrate_mbps",
+              "max_video_bitrate_mbps",
+              "preferred_video_bitrate_mbps"
+            ] do
+    case Float.parse(value) do
+      {float, ""} -> float
+      _ -> nil
+    end
+  end
+
+  defp transform_quality_standard_value(key, value)
+       when key in [
+              "min_audio_bitrate_kbps",
+              "max_audio_bitrate_kbps",
+              "preferred_audio_bitrate_kbps",
+              "movie_min_size_mb",
+              "movie_max_size_mb",
+              "episode_min_size_mb",
+              "episode_max_size_mb"
+            ] do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp transform_quality_standard_value(key, value)
+       when key in [
+              "preferred_video_codecs",
+              "preferred_audio_codecs",
+              "preferred_audio_channels",
+              "preferred_resolutions",
+              "preferred_sources",
+              "hdr_formats"
+            ] do
+    case value do
+      list when is_list(list) -> list
+      str when is_binary(str) -> String.split(str, ",") |> Enum.map(&String.trim/1)
+      _ -> nil
+    end
+  end
+
+  defp transform_quality_standard_value("require_hdr", value) do
+    value == "true" || value == true
+  end
+
+  defp transform_quality_standard_value(_key, value), do: value
+
+  defp transform_metadata_preferences(prefs) when is_map(prefs) do
+    prefs
+    |> Enum.reduce(%{}, fn {key, value}, acc ->
+      # Map fallback_languages_string to fallback_languages
+      actual_key = if key == "fallback_languages_string", do: "fallback_languages", else: key
+
+      case transform_metadata_pref_value(key, value) do
+        nil -> acc
+        transformed_value -> Map.put(acc, actual_key, transformed_value)
+      end
+    end)
+    |> case do
+      empty when empty == %{} -> nil
+      non_empty -> non_empty
+    end
+  end
+
+  defp transform_metadata_pref_value(_key, ""), do: nil
+  defp transform_metadata_pref_value(_key, nil), do: nil
+
+  # Handle fallback_languages_string -> convert to fallback_languages array
+  defp transform_metadata_pref_value("fallback_languages_string", value) when is_binary(value) do
+    value
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> case do
+      [] -> nil
+      langs -> langs
+    end
+  end
+
+  defp transform_metadata_pref_value(key, value)
+       when key in ["provider_priority", "fallback_languages"] do
+    case value do
+      list when is_list(list) -> list
+      str when is_binary(str) -> String.split(str, ",") |> Enum.map(&String.trim/1)
+      _ -> nil
+    end
+  end
+
+  defp transform_metadata_pref_value("auto_refresh_interval_hours", value) do
+    case Integer.parse(value) do
+      {int, ""} -> int
+      _ -> nil
+    end
+  end
+
+  defp transform_metadata_pref_value(key, value)
+       when key in [
+              "auto_fetch_enabled",
+              "fallback_on_provider_failure",
+              "skip_unavailable_providers"
+            ] do
+    value == "true" || value == true
+  end
+
+  defp transform_metadata_pref_value(_key, value), do: value
+
+  # Helper function for export MIME types
+  defp get_export_mime_type(:json), do: "application/json"
+  defp get_export_mime_type(:yaml), do: "application/x-yaml"
+  defp get_export_mime_type(_), do: "application/octet-stream"
+
+  # System Status Functions (consolidated from AdminStatusLive)
+
+  defp load_system_data(socket) do
+    socket
+    |> assign(:database_info, get_database_info())
+    |> assign(:system_info, get_system_info())
+  end
+
+  defp get_database_info do
+    if DB.postgres?() do
+      get_postgres_database_info()
+    else
+      get_sqlite_database_info()
+    end
+  end
+
+  defp get_sqlite_database_info do
+    config = Application.get_env(:mydia, Mydia.Repo, [])
+    db_path = Keyword.get(config, :database, "unknown")
+
+    file_size =
+      if File.exists?(db_path) do
+        File.stat!(db_path).size
+      else
+        0
+      end
+
+    %{
+      adapter: :sqlite,
+      path: db_path,
+      size: format_file_size(file_size),
+      exists: File.exists?(db_path),
+      health: get_database_health()
+    }
+  end
+
+  defp get_postgres_database_info do
+    config = Application.get_env(:mydia, Mydia.Repo, [])
+    hostname = Keyword.get(config, :hostname, "localhost")
+    port = Keyword.get(config, :port, 5432)
+    database = Keyword.get(config, :database, "unknown")
+
+    # Get database size from PostgreSQL
+    size =
+      try do
+        %{rows: [[size_bytes]]} =
+          Repo.query!("SELECT pg_database_size(current_database())")
+
+        format_file_size(size_bytes)
+      rescue
+        _ -> "Unknown"
+      end
+
+    %{
+      adapter: :postgres,
+      hostname: hostname,
+      port: port,
+      database: database,
+      size: size,
+      health: get_database_health()
+    }
+  end
+
+  defp get_database_health do
+    # In test environment, consider the database healthy if a connection exists
+    # This avoids issues with SQL sandbox in LiveView processes
+    if Mix.env() == :test do
+      :healthy
+    else
+      if Repo.checked_out?() or test_db_connection(), do: :healthy, else: :unhealthy
+    end
+  end
+
+  defp test_db_connection do
+    Repo.query!("SELECT 1")
+    true
+  rescue
+    _ -> false
+  end
+
+  defp get_system_info do
+    memory = :erlang.memory()
+    total_memory = Keyword.get(memory, :total, 0)
+
+    %{
+      app_version: System.app_version(),
+      dev_mode: System.dev_mode?(),
+      elixir_version: Elixir.System.version(),
+      memory_used: format_file_size(total_memory),
+      uptime: format_uptime(:erlang.statistics(:wall_clock) |> elem(0))
+    }
+  end
+
+  defp format_file_size(bytes) when is_integer(bytes) do
+    cond do
+      bytes >= 1_099_511_627_776 -> "#{Float.round(bytes / 1_099_511_627_776, 2)} TB"
+      bytes >= 1_073_741_824 -> "#{Float.round(bytes / 1_073_741_824, 2)} GB"
+      bytes >= 1_048_576 -> "#{Float.round(bytes / 1_048_576, 2)} MB"
+      bytes >= 1024 -> "#{Float.round(bytes / 1024, 2)} KB"
+      true -> "#{bytes} B"
+    end
+  end
+
+  defp format_uptime(milliseconds) do
+    seconds = div(milliseconds, 1000)
+    minutes = div(seconds, 60)
+    hours = div(minutes, 60)
+    days = div(hours, 24)
 
     cond do
-      diff < 60 -> "#{diff}s ago"
-      diff < 3600 -> "#{div(diff, 60)}m ago"
-      diff < 86400 -> "#{div(diff, 3600)}h ago"
-      true -> "#{div(diff, 86400)}d ago"
+      days > 0 -> "#{days}d #{rem(hours, 24)}h"
+      hours > 0 -> "#{hours}h #{rem(minutes, 60)}m"
+      minutes > 0 -> "#{minutes}m #{rem(seconds, 60)}s"
+      true -> "#{seconds}s"
     end
   end
 end

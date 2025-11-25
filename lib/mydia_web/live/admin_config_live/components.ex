@@ -1,0 +1,2196 @@
+defmodule MydiaWeb.AdminConfigLive.Components do
+  @moduledoc """
+  Function components for the admin configuration LiveView.
+
+  This module contains all the tab and modal components extracted
+  from the main template for improved maintainability.
+  """
+  use MydiaWeb, :html
+
+  alias Mydia.Settings
+
+  # ============================================================================
+  # Tab Components
+  # ============================================================================
+
+  @doc """
+  Renders the System Status tab content.
+  """
+  attr :system_info, :map, required: true
+  attr :database_info, :map, required: true
+  attr :library_paths, :list, required: true
+  attr :download_clients, :list, required: true
+  attr :indexers, :list, required: true
+
+  def status_tab(assigns) do
+    ~H"""
+    <div class="space-y-8 p-6">
+      <%!-- Top Row: System Info + Database --%>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <%!-- System Information --%>
+        <div>
+          <h3 class="text-lg font-semibold flex items-center gap-2 mb-4">
+            <.icon name="hero-server" class="w-5 h-5 text-primary" /> System
+          </h3>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="stat p-4 bg-base-200 rounded-lg">
+              <div class="stat-title text-sm">Version</div>
+              <div class="stat-value text-xl">
+                {@system_info.app_version}
+                <%= if @system_info.dev_mode do %>
+                  <span class="badge badge-warning badge-sm ml-1">dev</span>
+                <% end %>
+              </div>
+            </div>
+            <div class="stat p-4 bg-base-200 rounded-lg">
+              <div class="stat-title text-sm">Elixir</div>
+              <div class="stat-value text-xl">{@system_info.elixir_version}</div>
+            </div>
+            <div class="stat p-4 bg-base-200 rounded-lg">
+              <div class="stat-title text-sm">Memory</div>
+              <div class="stat-value text-xl">{@system_info.memory_used}</div>
+            </div>
+            <div class="stat p-4 bg-base-200 rounded-lg">
+              <div class="stat-title text-sm">Uptime</div>
+              <div class="stat-value text-xl">{@system_info.uptime}</div>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Database Information --%>
+        <div>
+          <h3 class="text-lg font-semibold flex items-center gap-2 mb-4">
+            <.icon name="hero-circle-stack" class="w-5 h-5 text-primary" /> Database
+            <span class={"badge #{health_badge(@database_info.health)}"}>
+              {if @database_info.health == :healthy, do: "Healthy", else: "Unhealthy"}
+            </span>
+          </h3>
+          <div class="space-y-3 bg-base-200 rounded-lg p-5">
+            <%= if @database_info.adapter == :postgres do %>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Adapter</span>
+                <span class="badge badge-info">PostgreSQL</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Host</span>
+                <code class="text-sm bg-base-300 px-2 py-1 rounded">
+                  {@database_info.hostname}:{@database_info.port}
+                </code>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Database</span>
+                <code class="text-sm bg-base-300 px-2 py-1 rounded">
+                  {@database_info.database}
+                </code>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Size</span>
+                <span class="font-medium">{@database_info.size}</span>
+              </div>
+            <% else %>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Adapter</span>
+                <span class="badge badge-info">SQLite</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Location</span>
+                <code class="text-sm bg-base-300 px-2 py-1 rounded truncate max-w-[250px]">
+                  {@database_info.path}
+                </code>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Size</span>
+                <span class="font-medium">{@database_info.size}</span>
+              </div>
+              <div class="flex justify-between items-center">
+                <span class="text-base-content/70">Exists</span>
+                <span class={[
+                  "badge",
+                  if(@database_info.exists, do: "badge-success", else: "badge-error")
+                ]}>
+                  {if @database_info.exists, do: "Yes", else: "No"}
+                </span>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <%!-- Bottom Row: Summary Tables in Grid --%>
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        <%!-- Library Paths Summary --%>
+        <div>
+          <h3 class="text-lg font-semibold flex items-center gap-2 mb-4">
+            <.icon name="hero-folder" class="w-5 h-5 text-primary" /> Library Paths
+            <span class="badge badge-ghost">{length(@library_paths)}</span>
+          </h3>
+          <%= if @library_paths == [] do %>
+            <div class="alert alert-info">
+              <.icon name="hero-information-circle" class="w-5 h-5" />
+              <span>No paths configured</span>
+            </div>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-zebra">
+                <thead>
+                  <tr>
+                    <th>Path</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <%= for path <- @library_paths do %>
+                    <tr>
+                      <td class="font-mono text-sm truncate max-w-[180px]" title={path.path}>
+                        {path.path}
+                      </td>
+                      <td><span class="badge badge-sm">{path.type}</span></td>
+                      <td>
+                        <span class={[
+                          "badge badge-sm",
+                          if(path.monitored, do: "badge-success", else: "badge-ghost")
+                        ]}>
+                          {if path.monitored, do: "Active", else: "Off"}
+                        </span>
+                      </td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Download Clients Summary --%>
+        <div>
+          <h3 class="text-lg font-semibold flex items-center gap-2 mb-4">
+            <.icon name="hero-arrow-down-tray" class="w-5 h-5 text-primary" /> Clients
+            <span class="badge badge-ghost">{length(@download_clients)}</span>
+          </h3>
+          <%= if @download_clients == [] do %>
+            <div class="alert alert-info">
+              <.icon name="hero-information-circle" class="w-5 h-5" />
+              <span>No clients configured</span>
+            </div>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-zebra">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <%= for client <- @download_clients do %>
+                    <tr>
+                      <td class="font-medium">{client.name}</td>
+                      <td><span class="badge badge-sm">{client.type}</span></td>
+                      <td>
+                        <span class={[
+                          "badge badge-sm",
+                          if(client.enabled, do: "badge-success", else: "badge-ghost")
+                        ]}>
+                          {if client.enabled, do: "On", else: "Off"}
+                        </span>
+                      </td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+
+        <%!-- Indexers Summary --%>
+        <div>
+          <h3 class="text-lg font-semibold flex items-center gap-2 mb-4">
+            <.icon name="hero-magnifying-glass" class="w-5 h-5 text-primary" /> Indexers
+            <span class="badge badge-ghost">{length(@indexers)}</span>
+          </h3>
+          <%= if @indexers == [] do %>
+            <div class="alert alert-info">
+              <.icon name="hero-information-circle" class="w-5 h-5" />
+              <span>No indexers configured</span>
+            </div>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-zebra">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <%= for indexer <- @indexers do %>
+                    <tr>
+                      <td class="font-medium">{indexer.name}</td>
+                      <td>
+                        <span class="badge badge-sm">
+                          {format_indexer_type(indexer.type)}
+                        </span>
+                      </td>
+                      <td>
+                        <span class={[
+                          "badge badge-sm",
+                          if(indexer.enabled, do: "badge-success", else: "badge-ghost")
+                        ]}>
+                          {if indexer.enabled, do: "On", else: "Off"}
+                        </span>
+                      </td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the General Settings tab content.
+  """
+  attr :config_settings_with_sources, :map, required: true
+  attr :crash_report_stats, :map, required: true
+
+  def general_settings_tab(assigns) do
+    ~H"""
+    <%!-- Crash Reporting Queue Alert --%>
+    <%= if @crash_report_stats.enabled && @crash_report_stats.queued_reports > 0 do %>
+      <div class="alert alert-warning m-6 mb-4">
+        <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
+        <div class="flex-1">
+          <span class="font-medium">
+            {@crash_report_stats.queued_reports} crash reports pending
+          </span>
+        </div>
+        <button
+          class="btn btn-sm btn-ghost"
+          phx-click="clear_crash_queue"
+          data-confirm="Clear all pending crash reports?"
+        >
+          <.icon name="hero-trash" class="w-4 h-4" /> Clear
+        </button>
+      </div>
+    <% end %>
+
+    <div class="overflow-x-auto">
+      <table class="table table-zebra w-full">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Setting</th>
+            <th>Value</th>
+            <th>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <%= for {category, settings} <- @config_settings_with_sources do %>
+            <%= for setting <- settings do %>
+              <tr>
+                <td class="font-medium">{category}</td>
+                <td class="font-mono text-sm">{setting.key}</td>
+                <td>
+                  <%= cond do %>
+                    <% is_boolean(setting.value) -> %>
+                      <%= if setting.source == :env do %>
+                        <span class={[
+                          "badge",
+                          if(setting.value, do: "badge-success", else: "badge-ghost")
+                        ]}>
+                          {if setting.value, do: "Enabled", else: "Disabled"}
+                        </span>
+                      <% else %>
+                        <input
+                          type="checkbox"
+                          class="toggle toggle-primary"
+                          checked={setting.value}
+                          phx-click="toggle_setting"
+                          phx-value-key={setting.key}
+                          phx-value-value={to_string(!setting.value)}
+                          phx-value-category={category}
+                        />
+                      <% end %>
+                    <% String.contains?(setting.key, "secret") or String.contains?(setting.key, "key") -> %>
+                      <span class="text-base-content/50">••••••••</span>
+                    <% is_nil(setting.value) or setting.value == "" -> %>
+                      <span class="text-base-content/50 italic">Not set</span>
+                    <% true -> %>
+                      <%= if setting.source == :env do %>
+                        <code class="text-sm bg-base-300 px-2 py-1 rounded">{setting.value}</code>
+                      <% else %>
+                        <input
+                          type="text"
+                          class="input input-sm input-bordered w-48"
+                          value={setting.value}
+                          phx-debounce="1000"
+                          phx-blur="update_setting_form"
+                          phx-value-key={setting.key}
+                          phx-value-category={category}
+                        />
+                      <% end %>
+                  <% end %>
+                </td>
+                <td>
+                  <%= case setting.source do %>
+                    <% :env -> %>
+                      <span class="badge badge-info badge-sm">ENV</span>
+                    <% :database -> %>
+                      <span class="badge badge-primary badge-sm">Database</span>
+                    <% :yaml -> %>
+                      <span class="badge badge-secondary badge-sm">YAML</span>
+                    <% _ -> %>
+                      <span class="badge badge-ghost badge-sm">Default</span>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Quality Profiles tab content.
+  """
+  attr :quality_profiles, :list, required: true
+
+  def quality_profiles_tab(assigns) do
+    ~H"""
+    <div phx-hook="DownloadFile" id="quality-profiles-section">
+      <div class="flex justify-between items-center p-6 pb-4">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-sparkles" class="w-5 h-5 text-primary" /> Quality Profiles
+          <span class="badge badge-sm badge-ghost">{length(@quality_profiles)}</span>
+        </h3>
+        <div class="flex gap-2">
+          <button class="btn btn-sm btn-secondary" phx-click="show_import_modal">
+            <.icon name="hero-arrow-up-tray" class="w-4 h-4" /> Import
+          </button>
+          <button class="btn btn-sm btn-primary" phx-click="new_quality_profile">
+            <.icon name="hero-plus" class="w-4 h-4" /> New
+          </button>
+        </div>
+      </div>
+
+      <%= if @quality_profiles == [] do %>
+        <div class="alert alert-info py-2 mx-6 mb-6">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span class="text-sm">
+            No quality profiles configured yet. Create one to get started.
+          </span>
+        </div>
+      <% else %>
+        <div class="overflow-x-auto">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Codecs</th>
+                <th>Resolutions</th>
+                <th>File Sizes</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for profile <- @quality_profiles do %>
+                <% standards = profile.quality_standards || %{} %>
+                <% video_codecs = get_in(standards, [:preferred_video_codecs]) || [] %>
+                <% resolutions = get_in(standards, [:preferred_resolutions]) || [] %>
+                <% movie_min = get_in(standards, [:movie_min_size_mb]) %>
+                <% movie_max = get_in(standards, [:movie_max_size_mb]) %>
+                <% episode_min = get_in(standards, [:episode_min_size_mb]) %>
+                <% episode_max = get_in(standards, [:episode_max_size_mb]) %>
+
+                <tr>
+                  <td>
+                    <div class="flex items-center gap-2">
+                      <span class="font-medium">{profile.name}</span>
+                      <%= if profile.is_system do %>
+                        <span class="badge badge-primary badge-sm">System</span>
+                      <% end %>
+                    </div>
+                  </td>
+                  <td>
+                    <%= if video_codecs != [] do %>
+                      <div class="flex flex-wrap gap-1">
+                        <%= for codec <- Enum.take(video_codecs, 3) do %>
+                          <span class="badge badge-ghost badge-sm">{codec}</span>
+                        <% end %>
+                        <%= if length(video_codecs) > 3 do %>
+                          <span class="badge badge-ghost badge-sm">
+                            +{length(video_codecs) - 3}
+                          </span>
+                        <% end %>
+                      </div>
+                    <% else %>
+                      <span class="text-base-content/50">-</span>
+                    <% end %>
+                  </td>
+                  <td>
+                    <%= if resolutions != [] do %>
+                      <div class="flex flex-wrap gap-1">
+                        <%= for res <- Enum.take(resolutions, 2) do %>
+                          <span class="badge badge-ghost badge-sm">{res}</span>
+                        <% end %>
+                        <%= if length(resolutions) > 2 do %>
+                          <span class="badge badge-ghost badge-sm">
+                            +{length(resolutions) - 2}
+                          </span>
+                        <% end %>
+                      </div>
+                    <% else %>
+                      <span class="text-base-content/50">-</span>
+                    <% end %>
+                  </td>
+                  <td>
+                    <div class="text-sm">
+                      <%= if movie_min || movie_max do %>
+                        <div>
+                          <span class="font-medium">Movies:</span>
+                          {movie_min || "0"} - {movie_max || "∞"} MB
+                        </div>
+                      <% end %>
+                      <%= if episode_min || episode_max do %>
+                        <div>
+                          <span class="font-medium">Episodes:</span>
+                          {episode_min || "0"} - {episode_max || "∞"} MB
+                        </div>
+                      <% end %>
+                      <%= if !movie_min && !movie_max && !episode_min && !episode_max do %>
+                        <span class="text-base-content/50">-</span>
+                      <% end %>
+                    </div>
+                  </td>
+                  <td>
+                    <div class="flex gap-2 justify-end">
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        phx-click="edit_quality_profile"
+                        phx-value-id={profile.id}
+                        title="Edit"
+                      >
+                        <.icon name="hero-pencil" class="w-4 h-4" />
+                      </button>
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        phx-click="duplicate_quality_profile"
+                        phx-value-id={profile.id}
+                        title="Duplicate"
+                      >
+                        <.icon name="hero-document-duplicate" class="w-4 h-4" />
+                      </button>
+                      <div class="dropdown dropdown-end">
+                        <label tabindex="0" class="btn btn-sm btn-ghost" title="Export">
+                          <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+                        </label>
+                        <ul
+                          tabindex="0"
+                          class="dropdown-content z-[1] menu p-2 shadow bg-base-100 rounded-box w-32"
+                        >
+                          <li>
+                            <button
+                              phx-click="export_quality_profile"
+                              phx-value-id={profile.id}
+                              phx-value-format="json"
+                            >
+                              <.icon name="hero-document-text" class="w-4 h-4" /> JSON
+                            </button>
+                          </li>
+                          <li>
+                            <button
+                              phx-click="export_quality_profile"
+                              phx-value-id={profile.id}
+                              phx-value-format="yaml"
+                            >
+                              <.icon name="hero-document-text" class="w-4 h-4" /> YAML
+                            </button>
+                          </li>
+                        </ul>
+                      </div>
+                      <button
+                        class="btn btn-sm btn-ghost btn-error"
+                        phx-click="delete_quality_profile"
+                        phx-value-id={profile.id}
+                        data-confirm="Are you sure you want to delete this quality profile?"
+                        title="Delete"
+                      >
+                        <.icon name="hero-trash" class="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Download Clients tab content.
+  """
+  attr :download_clients, :list, required: true
+  attr :client_health, :map, required: true
+
+  def download_clients_tab(assigns) do
+    ~H"""
+    <div>
+      <div class="flex justify-between items-center p-6 pb-4">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-arrow-down-tray" class="w-5 h-5 text-primary" /> Download Clients
+          <span class="badge badge-sm badge-ghost">{length(@download_clients)}</span>
+        </h3>
+        <button class="btn btn-sm btn-primary" phx-click="new_download_client">
+          <.icon name="hero-plus" class="w-4 h-4" /> New
+        </button>
+      </div>
+
+      <%= if @download_clients == [] do %>
+        <div class="alert alert-info py-2 mx-6 mb-6">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span class="text-sm">
+            No download clients configured yet. Add qBittorrent or Transmission to get started.
+          </span>
+        </div>
+      <% else %>
+        <div class="overflow-x-auto">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Host</th>
+                <th>Status</th>
+                <th>Enabled</th>
+                <th>Priority</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for client <- @download_clients do %>
+                <% health = Map.get(@client_health, client.id, %{status: :unknown}) %>
+                <% is_runtime = Settings.runtime_config?(client) %>
+                <tr>
+                  <td class="font-medium">
+                    <div class="flex items-center gap-2">
+                      <span>{client.name}</span>
+                      <%= if is_runtime do %>
+                        <div
+                          class="tooltip"
+                          data-tip="Configured via environment variables (read-only)"
+                        >
+                          <span class="badge badge-sm badge-primary">
+                            <.icon name="hero-lock-closed" class="w-3 h-3 mr-1" /> ENV
+                          </span>
+                        </div>
+                      <% end %>
+                    </div>
+                  </td>
+                  <td><span class="badge badge-sm">{client.type}</span></td>
+                  <td class="font-mono text-sm">
+                    {if client.use_ssl, do: "https://", else: "http://"}{client.host}:{client.port}
+                  </td>
+                  <td>
+                    <div class="flex items-center gap-2">
+                      <span class={"badge badge-sm #{health_status_badge_class(health.status)}"}>
+                        <.icon name={health_status_icon(health.status)} class="w-3 h-3 mr-1" />
+                        {health_status_label(health.status)}
+                      </span>
+                      <%= if health.status == :unhealthy and health[:error] do %>
+                        <div class="tooltip tooltip-left" data-tip={health.error}>
+                          <.icon name="hero-information-circle" class="w-4 h-4 text-error" />
+                        </div>
+                      <% end %>
+                      <%= if health.status == :healthy and health[:details] && Map.get(health.details, :version) do %>
+                        <div
+                          class="tooltip tooltip-left"
+                          data-tip={"Version: #{health.details.version}"}
+                        >
+                          <.icon name="hero-information-circle" class="w-4 h-4 text-success" />
+                        </div>
+                      <% end %>
+                    </div>
+                  </td>
+                  <td>
+                    <span class={
+                      if client.enabled, do: "badge badge-success", else: "badge badge-ghost"
+                    }>
+                      {if client.enabled, do: "Yes", else: "No"}
+                    </span>
+                  </td>
+                  <td>{client.priority}</td>
+                  <td>
+                    <div class="flex gap-2">
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        phx-click="test_download_client"
+                        phx-value-id={client.id}
+                      >
+                        <.icon name="hero-signal" class="w-4 h-4" />
+                      </button>
+                      <%= if is_runtime do %>
+                        <div class="tooltip" data-tip="Cannot edit runtime-configured clients">
+                          <button class="btn btn-sm btn-ghost btn-disabled" disabled>
+                            <.icon name="hero-pencil" class="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div
+                          class="tooltip"
+                          data-tip="Cannot delete runtime-configured clients"
+                        >
+                          <button class="btn btn-sm btn-ghost btn-disabled" disabled>
+                            <.icon name="hero-trash" class="w-4 h-4" />
+                          </button>
+                        </div>
+                      <% else %>
+                        <button
+                          class="btn btn-sm btn-ghost"
+                          phx-click="edit_download_client"
+                          phx-value-id={client.id}
+                        >
+                          <.icon name="hero-pencil" class="w-4 h-4" />
+                        </button>
+                        <button
+                          class="btn btn-sm btn-ghost btn-error"
+                          phx-click="delete_download_client"
+                          phx-value-id={client.id}
+                          data-confirm="Are you sure you want to delete this download client?"
+                        >
+                          <.icon name="hero-trash" class="w-4 h-4" />
+                        </button>
+                      <% end %>
+                    </div>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Indexers tab content.
+  """
+  attr :indexers, :list, required: true
+  attr :indexer_health, :map, required: true
+
+  def indexers_tab(assigns) do
+    ~H"""
+    <div>
+      <div class="flex justify-between items-center p-6 pb-4">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-magnifying-glass" class="w-5 h-5 text-primary" /> Indexers
+          <span class="badge badge-sm badge-ghost">{length(@indexers)}</span>
+        </h3>
+        <div class="flex gap-2">
+          <%= if Mydia.Indexers.CardigannFeatureFlags.enabled?() do %>
+            <.link
+              navigate={~p"/admin/config/indexers/library"}
+              class="btn btn-sm btn-secondary"
+            >
+              <.icon name="hero-book-open" class="w-4 h-4" /> Cardigann
+            </.link>
+          <% end %>
+          <button class="btn btn-sm btn-primary" phx-click="new_indexer">
+            <.icon name="hero-plus" class="w-4 h-4" /> New
+          </button>
+        </div>
+      </div>
+
+      <%= if @indexers == [] do %>
+        <div class="alert alert-info py-2 mx-6 mb-6">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span class="text-sm">
+            No indexers configured yet. Add Prowlarr, Jackett, or a public indexer to get started.
+          </span>
+        </div>
+      <% else %>
+        <div class="overflow-x-auto">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Base URL</th>
+                <th>Health</th>
+                <th>Enabled</th>
+                <th>Priority</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for indexer <- @indexers do %>
+                <% health = Map.get(@indexer_health, indexer.id, %{status: :unknown}) %>
+                <% is_runtime = Settings.runtime_config?(indexer) %>
+                <tr>
+                  <td class="font-medium">
+                    <div class="flex items-center gap-2">
+                      <span>{indexer.name}</span>
+                      <%= if is_runtime do %>
+                        <div
+                          class="tooltip"
+                          data-tip="Configured via environment variables (read-only)"
+                        >
+                          <span class="badge badge-sm badge-primary">
+                            <.icon name="hero-lock-closed" class="w-3 h-3 mr-1" /> ENV
+                          </span>
+                        </div>
+                      <% end %>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="badge badge-sm">{format_indexer_type(indexer.type)}</span>
+                  </td>
+                  <td class="font-mono text-sm">{indexer.base_url}</td>
+                  <td>
+                    <div class="flex items-center gap-2">
+                      <span class={"badge badge-sm #{health_status_badge_class(health.status)}"}>
+                        <.icon name={health_status_icon(health.status)} class="w-3 h-3 mr-1" />
+                        {health_status_label(health.status)}
+                      </span>
+                      <%= if health.status == :unhealthy and health[:error] do %>
+                        <div class="tooltip tooltip-left" data-tip={health.error}>
+                          <.icon name="hero-information-circle" class="w-4 h-4 text-error" />
+                        </div>
+                      <% end %>
+                      <%= if health.status == :healthy and health[:details] && Map.get(health.details, :version) do %>
+                        <div
+                          class="tooltip tooltip-left"
+                          data-tip={"Version: #{health.details.version}"}
+                        >
+                          <.icon name="hero-information-circle" class="w-4 h-4 text-success" />
+                        </div>
+                      <% end %>
+                      <%= if health[:consecutive_failures] && health.consecutive_failures > 0 do %>
+                        <div
+                          class="tooltip tooltip-left"
+                          data-tip={"#{health.consecutive_failures} consecutive failures"}
+                        >
+                          <.icon
+                            name="hero-exclamation-triangle"
+                            class="w-4 h-4 text-warning"
+                          />
+                        </div>
+                      <% end %>
+                    </div>
+                  </td>
+                  <td>
+                    <span class={
+                      if indexer.enabled, do: "badge badge-success", else: "badge badge-ghost"
+                    }>
+                      {if indexer.enabled, do: "Yes", else: "No"}
+                    </span>
+                  </td>
+                  <td>{indexer.priority}</td>
+                  <td>
+                    <div class="flex gap-2">
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        phx-click="test_indexer"
+                        phx-value-id={indexer.id}
+                      >
+                        <.icon name="hero-signal" class="w-4 h-4" />
+                      </button>
+                      <%= if is_runtime do %>
+                        <div
+                          class="tooltip"
+                          data-tip="Cannot edit runtime-configured indexers"
+                        >
+                          <button class="btn btn-sm btn-ghost btn-disabled" disabled>
+                            <.icon name="hero-pencil" class="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div
+                          class="tooltip"
+                          data-tip="Cannot delete runtime-configured indexers"
+                        >
+                          <button class="btn btn-sm btn-ghost btn-disabled" disabled>
+                            <.icon name="hero-trash" class="w-4 h-4" />
+                          </button>
+                        </div>
+                      <% else %>
+                        <button
+                          class="btn btn-sm btn-ghost"
+                          phx-click="edit_indexer"
+                          phx-value-id={indexer.id}
+                        >
+                          <.icon name="hero-pencil" class="w-4 h-4" />
+                        </button>
+                        <button
+                          class="btn btn-sm btn-ghost btn-error"
+                          phx-click="delete_indexer"
+                          phx-value-id={indexer.id}
+                          data-confirm="Are you sure you want to delete this indexer?"
+                        >
+                          <.icon name="hero-trash" class="w-4 h-4" />
+                        </button>
+                      <% end %>
+                    </div>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Library Paths tab content.
+  """
+  attr :library_paths, :list, required: true
+
+  def library_paths_tab(assigns) do
+    ~H"""
+    <div>
+      <div class="flex justify-between items-center p-6 pb-4">
+        <h3 class="text-lg font-semibold flex items-center gap-2">
+          <.icon name="hero-folder" class="w-5 h-5 text-primary" /> Library Paths
+          <span class="badge badge-sm badge-ghost">{length(@library_paths)}</span>
+        </h3>
+        <button class="btn btn-sm btn-primary" phx-click="new_library_path">
+          <.icon name="hero-plus" class="w-4 h-4" /> New
+        </button>
+      </div>
+
+      <%= if @library_paths == [] do %>
+        <div class="alert alert-info py-2 mx-6 mb-6">
+          <.icon name="hero-information-circle" class="w-5 h-5" />
+          <span class="text-sm">
+            No library paths configured yet. Add a media directory to get started.
+          </span>
+        </div>
+      <% else %>
+        <div class="overflow-x-auto">
+          <table class="table table-sm table-zebra">
+            <thead>
+              <tr>
+                <th>Path</th>
+                <th>Type</th>
+                <th>Monitored</th>
+                <th>Last Scan</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <%= for path <- @library_paths do %>
+                <tr>
+                  <td class="font-mono text-sm">{path.path}</td>
+                  <td><span class="badge badge-sm">{path.type}</span></td>
+                  <td>
+                    <span class={
+                      if path.monitored, do: "badge badge-success", else: "badge badge-ghost"
+                    }>
+                      {if path.monitored, do: "Yes", else: "No"}
+                    </span>
+                  </td>
+                  <td class="text-sm text-base-content/70">
+                    {if path.last_scan_at,
+                      do: Calendar.strftime(path.last_scan_at, "%Y-%m-%d %H:%M"),
+                      else: "Never"}
+                  </td>
+                  <td>
+                    <div class="flex gap-2">
+                      <button
+                        class="btn btn-sm btn-ghost"
+                        phx-click="edit_library_path"
+                        phx-value-id={path.id}
+                      >
+                        <.icon name="hero-pencil" class="w-4 h-4" />
+                      </button>
+                      <button
+                        class="btn btn-sm btn-ghost btn-error"
+                        phx-click="delete_library_path"
+                        phx-value-id={path.id}
+                        data-confirm="Are you sure you want to delete this library path?"
+                      >
+                        <.icon name="hero-trash" class="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </div>
+    """
+  end
+
+  # ============================================================================
+  # Modal Components
+  # ============================================================================
+
+  @doc """
+  Renders the Quality Profile modal.
+  """
+  attr :quality_profile_form, :any, required: true
+  attr :quality_profile_mode, :atom, required: true
+  attr :quality_profile_active_tab, :string, required: true
+
+  def quality_profile_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box max-w-5xl">
+        <h3 class="font-bold text-lg mb-4">
+          {if @quality_profile_mode == :new,
+            do: "New Quality Profile",
+            else: "Edit Quality Profile"}
+        </h3>
+
+        <%!-- Tab Navigation --%>
+        <div role="tablist" class="tabs tabs-bordered mb-6">
+          <button
+            type="button"
+            role="tab"
+            class={["tab", @quality_profile_active_tab == "basic" && "tab-active"]}
+            phx-click="change_quality_profile_tab"
+            phx-value-tab="basic"
+          >
+            Basic Info
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class={["tab", @quality_profile_active_tab == "standards" && "tab-active"]}
+            phx-click="change_quality_profile_tab"
+            phx-value-tab="standards"
+          >
+            Quality Standards
+          </button>
+          <button
+            type="button"
+            role="tab"
+            class={["tab", @quality_profile_active_tab == "metadata" && "tab-active"]}
+            phx-click="change_quality_profile_tab"
+            phx-value-tab="metadata"
+          >
+            Metadata Preferences
+          </button>
+        </div>
+
+        <.form
+          for={@quality_profile_form}
+          id="quality-profile-form"
+          phx-change="validate_quality_profile"
+          phx-submit="save_quality_profile"
+        >
+          <%!-- Basic Info Tab --%>
+          <%= if @quality_profile_active_tab == "basic" do %>
+            <.quality_profile_basic_tab form={@quality_profile_form} />
+          <% end %>
+
+          <%!-- Quality Standards Tab --%>
+          <%= if @quality_profile_active_tab == "standards" do %>
+            <.quality_profile_standards_tab form={@quality_profile_form} />
+          <% end %>
+
+          <%!-- Metadata Preferences Tab --%>
+          <%= if @quality_profile_active_tab == "metadata" do %>
+            <.quality_profile_metadata_tab form={@quality_profile_form} />
+          <% end %>
+
+          <div class="modal-action">
+            <button type="button" class="btn" phx-click="close_quality_profile_modal">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">Save Profile</button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Basic Info tab content for the Quality Profile modal.
+  """
+  attr :form, :any, required: true
+
+  def quality_profile_basic_tab(assigns) do
+    ~H"""
+    <div class="space-y-4">
+      <%!-- System Profile Indicator --%>
+      <%= if Ecto.Changeset.get_field(@form.source, :is_system, false) do %>
+        <div class="alert alert-warning">
+          <.icon name="hero-lock-closed" class="w-5 h-5" />
+          <div>
+            <div class="font-semibold">System Profile</div>
+            <div class="text-sm">
+              This is a built-in system profile. Some fields may be restricted.
+            </div>
+          </div>
+        </div>
+      <% end %>
+
+      <.input field={@form[:name]} type="text" label="Name" required />
+
+      <.input
+        field={@form[:description]}
+        type="textarea"
+        label="Description"
+        rows="3"
+      />
+
+      <%!-- Allowed Qualities --%>
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text">
+            Allowed Qualities <span class="text-error">*</span>
+          </span>
+        </label>
+        <div class="grid grid-cols-3 gap-2">
+          <%= for quality <- ["360p", "480p", "576p", "720p", "1080p", "2160p", "4320p"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[qualities][]"
+                value={quality}
+                checked={quality in (Ecto.Changeset.get_field(@form.source, :qualities) || [])}
+                class="checkbox checkbox-sm"
+              />
+              <span class="label-text">{quality}</span>
+            </label>
+          <% end %>
+        </div>
+        <%= if @form.errors[:qualities] do %>
+          <label class="label">
+            <span class="label-text-alt text-error">
+              {translate_error(@form.errors[:qualities])}
+            </span>
+          </label>
+        <% end %>
+      </div>
+
+      <%!-- Upgrade Settings --%>
+      <div class="divider">Upgrade Settings</div>
+
+      <.input
+        field={@form[:upgrades_allowed]}
+        type="checkbox"
+        label="Allow Quality Upgrades"
+      />
+
+      <%= if Ecto.Changeset.get_field(@form.source, :upgrades_allowed, true) do %>
+        <.input
+          field={@form[:upgrade_until_quality]}
+          type="select"
+          label="Upgrade Until Quality"
+          options={[
+            {"Don't upgrade", nil}
+            | Enum.map(["480p", "576p", "720p", "1080p", "2160p", "4320p"], &{&1, &1})
+          ]}
+        />
+      <% end %>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Quality Standards tab content for the Quality Profile modal.
+  """
+  attr :form, :any, required: true
+
+  def quality_profile_standards_tab(assigns) do
+    ~H"""
+    <div class="space-y-6">
+      <div class="alert alert-info">
+        <.icon name="hero-information-circle" class="w-5 h-5" />
+        <span class="text-sm">
+          Configure quality standards including codecs, bitrates, resolutions, and file sizes. Leave fields empty to allow any value.
+        </span>
+      </div>
+
+      <%!-- Video Codecs --%>
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Preferred Video Codecs</span>
+          <span class="label-text-alt text-xs">In priority order</span>
+        </label>
+        <div class="grid grid-cols-3 md:grid-cols-5 gap-2">
+          <%= for codec <- ["h265", "h264", "av1", "hevc", "x264", "x265", "vc1", "mpeg2", "xvid", "divx"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[quality_standards][preferred_video_codecs][]"
+                value={codec}
+                checked={
+                  codec in (get_in(
+                              Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                              [:preferred_video_codecs]
+                            ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text text-sm">{codec}</span>
+            </label>
+          <% end %>
+        </div>
+      </div>
+
+      <%!-- Audio Settings --%>
+      <div class="divider">Audio Settings</div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Preferred Audio Codecs</span>
+        </label>
+        <div class="grid grid-cols-3 md:grid-cols-5 gap-2">
+          <%= for codec <- ["aac", "ac3", "eac3", "dts", "dts-hd", "truehd", "atmos", "flac", "mp3", "opus"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[quality_standards][preferred_audio_codecs][]"
+                value={codec}
+                checked={
+                  codec in (get_in(
+                              Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                              [:preferred_audio_codecs]
+                            ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text text-sm">{codec}</span>
+            </label>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Preferred Audio Channels</span>
+        </label>
+        <div class="grid grid-cols-3 md:grid-cols-4 gap-2">
+          <%= for channels <- ["1.0", "2.0", "2.1", "5.1", "6.1", "7.1", "7.1.2", "7.1.4"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[quality_standards][preferred_audio_channels][]"
+                value={channels}
+                checked={
+                  channels in (get_in(
+                                 Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                                 [:preferred_audio_channels]
+                               ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text text-sm">{channels}</span>
+            </label>
+          <% end %>
+        </div>
+      </div>
+
+      <%!-- Resolution Settings --%>
+      <div class="divider">Resolution Settings</div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Minimum Resolution</span>
+          </label>
+          <select
+            name="quality_profile[quality_standards][min_resolution]"
+            class="select select-bordered w-full"
+          >
+            <option value="">No minimum</option>
+            <%= for res <- ["360p", "480p", "576p", "720p", "1080p", "2160p", "4320p"] do %>
+              <option
+                value={res}
+                selected={
+                  res ==
+                    get_in(
+                      Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                      [:min_resolution]
+                    )
+                }
+              >
+                {res}
+              </option>
+            <% end %>
+          </select>
+        </div>
+
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Maximum Resolution</span>
+          </label>
+          <select
+            name="quality_profile[quality_standards][max_resolution]"
+            class="select select-bordered w-full"
+          >
+            <option value="">No maximum</option>
+            <%= for res <- ["360p", "480p", "576p", "720p", "1080p", "2160p", "4320p"] do %>
+              <option
+                value={res}
+                selected={
+                  res ==
+                    get_in(
+                      Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                      [:max_resolution]
+                    )
+                }
+              >
+                {res}
+              </option>
+            <% end %>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Preferred Resolutions</span>
+        </label>
+        <div class="grid grid-cols-3 md:grid-cols-4 gap-2">
+          <%= for res <- ["360p", "480p", "576p", "720p", "1080p", "2160p", "4320p"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[quality_standards][preferred_resolutions][]"
+                value={res}
+                checked={
+                  res in (get_in(
+                            Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                            [:preferred_resolutions]
+                          ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text text-sm">{res}</span>
+            </label>
+          <% end %>
+        </div>
+      </div>
+
+      <%!-- Source Preferences --%>
+      <div class="divider">Source Preferences</div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Preferred Sources</span>
+          <span class="label-text-alt text-xs">In priority order</span>
+        </label>
+        <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+          <%= for source <- ["BluRay", "REMUX", "WEB-DL", "WEBRip", "HDTV", "SDTV", "DVD", "DVDRip", "BDRip"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[quality_standards][preferred_sources][]"
+                value={source}
+                checked={
+                  source in (get_in(
+                               Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                               [:preferred_sources]
+                             ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text text-sm">{source}</span>
+            </label>
+          <% end %>
+        </div>
+      </div>
+
+      <%!-- Bitrate Ranges --%>
+      <div class="divider">Bitrate Ranges</div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Video Bitrate (Mbps)</span>
+        </label>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <input
+              type="number"
+              name="quality_profile[quality_standards][min_video_bitrate_mbps]"
+              placeholder="Min"
+              step="0.1"
+              min="0"
+              value={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                  [:min_video_bitrate_mbps]
+                )
+              }
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt">Minimum</span>
+            </label>
+          </div>
+          <div>
+            <input
+              type="number"
+              name="quality_profile[quality_standards][max_video_bitrate_mbps]"
+              placeholder="Max"
+              step="0.1"
+              min="0"
+              value={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                  [:max_video_bitrate_mbps]
+                )
+              }
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt">Maximum</span>
+            </label>
+          </div>
+          <div>
+            <input
+              type="number"
+              name="quality_profile[quality_standards][preferred_video_bitrate_mbps]"
+              placeholder="Preferred"
+              step="0.1"
+              min="0"
+              value={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                  [:preferred_video_bitrate_mbps]
+                )
+              }
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt">Preferred</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Audio Bitrate (kbps)</span>
+        </label>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <input
+              type="number"
+              name="quality_profile[quality_standards][min_audio_bitrate_kbps]"
+              placeholder="Min"
+              step="1"
+              min="0"
+              value={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                  [:min_audio_bitrate_kbps]
+                )
+              }
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt">Minimum</span>
+            </label>
+          </div>
+          <div>
+            <input
+              type="number"
+              name="quality_profile[quality_standards][max_audio_bitrate_kbps]"
+              placeholder="Max"
+              step="1"
+              min="0"
+              value={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                  [:max_audio_bitrate_kbps]
+                )
+              }
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt">Maximum</span>
+            </label>
+          </div>
+          <div>
+            <input
+              type="number"
+              name="quality_profile[quality_standards][preferred_audio_bitrate_kbps]"
+              placeholder="Preferred"
+              step="1"
+              min="0"
+              value={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                  [:preferred_audio_bitrate_kbps]
+                )
+              }
+              class="input input-bordered w-full"
+            />
+            <label class="label">
+              <span class="label-text-alt">Preferred</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <%!-- File Size Constraints --%>
+      <div class="divider">File Size Constraints (MB)</div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Movie File Sizes</span>
+          </label>
+          <div class="space-y-2">
+            <div>
+              <input
+                type="number"
+                name="quality_profile[quality_standards][movie_min_size_mb]"
+                placeholder="Min size (MB)"
+                step="1"
+                min="0"
+                value={
+                  get_in(
+                    Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                    [:movie_min_size_mb]
+                  )
+                }
+                class="input input-bordered w-full"
+              />
+              <label class="label">
+                <span class="label-text-alt">Minimum</span>
+              </label>
+            </div>
+            <div>
+              <input
+                type="number"
+                name="quality_profile[quality_standards][movie_max_size_mb]"
+                placeholder="Max size (MB)"
+                step="1"
+                min="0"
+                value={
+                  get_in(
+                    Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                    [:movie_max_size_mb]
+                  )
+                }
+                class="input input-bordered w-full"
+              />
+              <label class="label">
+                <span class="label-text-alt">Maximum</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Episode File Sizes</span>
+          </label>
+          <div class="space-y-2">
+            <div>
+              <input
+                type="number"
+                name="quality_profile[quality_standards][episode_min_size_mb]"
+                placeholder="Min size (MB)"
+                step="1"
+                min="0"
+                value={
+                  get_in(
+                    Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                    [:episode_min_size_mb]
+                  )
+                }
+                class="input input-bordered w-full"
+              />
+              <label class="label">
+                <span class="label-text-alt">Minimum</span>
+              </label>
+            </div>
+            <div>
+              <input
+                type="number"
+                name="quality_profile[quality_standards][episode_max_size_mb]"
+                placeholder="Max size (MB)"
+                step="1"
+                min="0"
+                value={
+                  get_in(
+                    Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                    [:episode_max_size_mb]
+                  )
+                }
+                class="input input-bordered w-full"
+              />
+              <label class="label">
+                <span class="label-text-alt">Maximum</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <%!-- HDR/Dolby Vision --%>
+      <div class="divider">HDR/Dolby Vision</div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Preferred HDR Formats</span>
+        </label>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <%= for format <- ["hdr10", "hdr10+", "dolby_vision", "hlg"] do %>
+            <label class="label cursor-pointer justify-start gap-2">
+              <input
+                type="checkbox"
+                name="quality_profile[quality_standards][hdr_formats][]"
+                value={format}
+                checked={
+                  format in (get_in(
+                               Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                               [:hdr_formats]
+                             ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text text-sm">{String.upcase(format)}</span>
+            </label>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label cursor-pointer justify-start gap-3">
+          <input
+            type="checkbox"
+            name="quality_profile[quality_standards][require_hdr]"
+            value="true"
+            checked={
+              get_in(
+                Ecto.Changeset.get_field(@form.source, :quality_standards, %{}),
+                [:require_hdr]
+              ) == true
+            }
+            class="checkbox checkbox-primary"
+          />
+          <div>
+            <span class="label-text font-semibold">Require HDR</span>
+            <p class="text-xs text-base-content/70">
+              Only accept files with HDR support
+            </p>
+          </div>
+        </label>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Metadata Preferences tab content for the Quality Profile modal.
+  """
+  attr :form, :any, required: true
+
+  def quality_profile_metadata_tab(assigns) do
+    ~H"""
+    <div class="space-y-6">
+      <div class="alert alert-info">
+        <.icon name="hero-information-circle" class="w-5 h-5" />
+        <span class="text-sm">
+          Configure metadata provider preferences, language settings, and auto-fetch options.
+        </span>
+      </div>
+
+      <%!-- Provider Priority --%>
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text font-semibold">Provider Priority</span>
+          <span class="label-text-alt text-xs">Providers are tried in order</span>
+        </label>
+        <div class="space-y-2">
+          <%= for provider <- ["metadata_relay", "tvdb", "tmdb", "omdb"] do %>
+            <label class="label cursor-pointer justify-start gap-2 bg-base-200 rounded-lg px-4 py-2">
+              <input
+                type="checkbox"
+                name="quality_profile[metadata_preferences][provider_priority][]"
+                value={provider}
+                checked={
+                  provider in (get_in(
+                                 Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                                 [:provider_priority]
+                               ) || [])
+                }
+                class="checkbox checkbox-sm checkbox-primary"
+              />
+              <span class="label-text flex-1 font-medium">
+                {provider
+                |> String.split("_")
+                |> Enum.map(&String.capitalize/1)
+                |> Enum.join(" ")}
+              </span>
+            </label>
+          <% end %>
+        </div>
+        <label class="label">
+          <span class="label-text-alt text-xs">
+            Select and order providers. Checked providers will be tried in the order they appear.
+          </span>
+        </label>
+      </div>
+
+      <%!-- Language & Region --%>
+      <div class="divider">Language & Region</div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Language</span>
+          </label>
+          <input
+            type="text"
+            name="quality_profile[metadata_preferences][language]"
+            placeholder="en-US"
+            value={
+              get_in(
+                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                [:language]
+              )
+            }
+            class="input input-bordered w-full"
+          />
+          <label class="label">
+            <span class="label-text-alt text-xs">
+              Language code (e.g., en-US, ja, fr-FR)
+            </span>
+          </label>
+        </div>
+
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Region</span>
+          </label>
+          <input
+            type="text"
+            name="quality_profile[metadata_preferences][region]"
+            placeholder="US"
+            maxlength="2"
+            value={
+              get_in(
+                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                [:region]
+              )
+            }
+            class="input input-bordered w-full"
+          />
+          <label class="label">
+            <span class="label-text-alt text-xs">
+              2-letter country code (e.g., US, UK, JP)
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-control">
+        <label class="label">
+          <span class="label-text">Fallback Languages</span>
+        </label>
+        <input
+          type="text"
+          name="quality_profile[metadata_preferences][fallback_languages_string]"
+          placeholder="en, ja, fr"
+          value={
+            case get_in(
+                   Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                   [:fallback_languages]
+                 ) do
+              nil -> ""
+              langs when is_list(langs) -> Enum.join(langs, ", ")
+              _ -> ""
+            end
+          }
+          class="input input-bordered w-full"
+        />
+        <label class="label">
+          <span class="label-text-alt text-xs">
+            Comma-separated list of language codes to try if primary language is unavailable
+          </span>
+        </label>
+      </div>
+
+      <%!-- Auto-Fetch Settings --%>
+      <div class="divider">Auto-Fetch Settings</div>
+
+      <div class="form-control">
+        <label class="label cursor-pointer justify-start gap-3">
+          <input
+            type="checkbox"
+            name="quality_profile[metadata_preferences][auto_fetch_enabled]"
+            value="true"
+            checked={
+              get_in(
+                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                [:auto_fetch_enabled]
+              ) == true
+            }
+            class="checkbox checkbox-primary"
+          />
+          <div>
+            <span class="label-text font-semibold">Enable Auto-Fetch</span>
+            <p class="text-xs text-base-content/70">
+              Automatically fetch and update metadata periodically
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <%= if get_in(
+               Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+               [:auto_fetch_enabled]
+             ) == true do %>
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Auto-Refresh Interval (hours)</span>
+          </label>
+          <input
+            type="number"
+            name="quality_profile[metadata_preferences][auto_refresh_interval_hours]"
+            placeholder="168"
+            step="1"
+            min="1"
+            value={
+              get_in(
+                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                [:auto_refresh_interval_hours]
+              ) || 168
+            }
+            class="input input-bordered w-full max-w-xs"
+          />
+          <label class="label">
+            <span class="label-text-alt text-xs">
+              How often to refresh metadata (default: 168 hours = 7 days)
+            </span>
+          </label>
+        </div>
+      <% end %>
+
+      <%!-- Fallback Behavior --%>
+      <div class="divider">Fallback Behavior</div>
+
+      <div class="space-y-3">
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-3">
+            <input
+              type="checkbox"
+              name="quality_profile[metadata_preferences][fallback_on_provider_failure]"
+              value="true"
+              checked={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                  [:fallback_on_provider_failure]
+                ) == true
+              }
+              class="checkbox checkbox-primary"
+            />
+            <div>
+              <span class="label-text font-semibold">Fallback on Provider Failure</span>
+              <p class="text-xs text-base-content/70">
+                Try next provider if current one fails
+              </p>
+            </div>
+          </label>
+        </div>
+
+        <div class="form-control">
+          <label class="label cursor-pointer justify-start gap-3">
+            <input
+              type="checkbox"
+              name="quality_profile[metadata_preferences][skip_unavailable_providers]"
+              value="true"
+              checked={
+                get_in(
+                  Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                  [:skip_unavailable_providers]
+                ) == true
+              }
+              class="checkbox checkbox-primary"
+            />
+            <div>
+              <span class="label-text font-semibold">Skip Unavailable Providers</span>
+              <p class="text-xs text-base-content/70">
+                Automatically skip providers that are down or unreachable
+              </p>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <%!-- Conflict Resolution --%>
+      <div class="divider">Conflict Resolution</div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Conflict Resolution</span>
+          </label>
+          <select
+            name="quality_profile[metadata_preferences][conflict_resolution]"
+            class="select select-bordered w-full"
+          >
+            <option value="">Choose strategy...</option>
+            <%= for {label, value} <- [
+                  {"Prefer Newer", "prefer_newer"},
+                  {"Prefer Older", "prefer_older"},
+                  {"Manual", "manual"}
+                ] do %>
+              <option
+                value={value}
+                selected={
+                  value ==
+                    get_in(
+                      Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                      [:conflict_resolution]
+                    )
+                }
+              >
+                {label}
+              </option>
+            <% end %>
+          </select>
+          <label class="label">
+            <span class="label-text-alt text-xs">
+              How to handle conflicting metadata from different providers
+            </span>
+          </label>
+        </div>
+
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text font-semibold">Merge Strategy</span>
+          </label>
+          <select
+            name="quality_profile[metadata_preferences][merge_strategy]"
+            class="select select-bordered w-full"
+          >
+            <option value="">Choose strategy...</option>
+            <%= for {label, value} <- [
+                  {"Union (combine all)", "union"},
+                  {"Intersection (only common)", "intersection"},
+                  {"Priority (first provider wins)", "priority"}
+                ] do %>
+              <option
+                value={value}
+                selected={
+                  value ==
+                    get_in(
+                      Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
+                      [:merge_strategy]
+                    )
+                }
+              >
+                {label}
+              </option>
+            <% end %>
+          </select>
+          <label class="label">
+            <span class="label-text-alt text-xs">
+              How to merge metadata when multiple providers return data
+            </span>
+          </label>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Import Quality Profile modal.
+  """
+  attr :import_error, :string, default: nil
+
+  def import_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-4">Import Quality Profile</h3>
+
+        <div class="space-y-4">
+          <div class="alert alert-info">
+            <.icon name="hero-information-circle" class="w-5 h-5" />
+            <span class="text-sm">
+              Import a quality profile from a remote URL. Supports both JSON and YAML formats.
+            </span>
+          </div>
+
+          <.form for={%{}} id="import-profile-form" phx-submit="import_quality_profile_url">
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text font-semibold">Profile URL</span>
+              </label>
+              <input
+                type="url"
+                name="url"
+                placeholder="https://example.com/my-quality-profile.json"
+                required
+                class="input input-bordered w-full"
+              />
+              <label class="label">
+                <span class="label-text-alt text-xs">
+                  Enter the URL of a JSON or YAML quality profile
+                </span>
+              </label>
+            </div>
+
+            <%= if @import_error do %>
+              <div class="alert alert-error mt-4">
+                <.icon name="hero-exclamation-circle" class="w-5 h-5" />
+                <span class="text-sm">{@import_error}</span>
+              </div>
+            <% end %>
+
+            <div class="modal-action">
+              <button type="button" class="btn" phx-click="close_import_modal">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <.icon name="hero-arrow-down-tray" class="w-5 h-5" /> Import
+              </button>
+            </div>
+          </.form>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Download Client modal.
+  """
+  attr :download_client_form, :any, required: true
+  attr :download_client_mode, :atom, required: true
+  attr :testing_download_client_connection, :boolean, default: false
+
+  def download_client_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-4">
+          {if @download_client_mode == :new,
+            do: "New Download Client",
+            else: "Edit Download Client"}
+        </h3>
+
+        <.form
+          for={@download_client_form}
+          id="download-client-form"
+          phx-change="validate_download_client"
+          phx-submit="save_download_client"
+        >
+          <div class="space-y-4">
+            <.input field={@download_client_form[:name]} type="text" label="Name" required />
+            <.input
+              field={@download_client_form[:type]}
+              type="select"
+              label="Type"
+              options={[
+                {"qBittorrent", "qbittorrent"},
+                {"Transmission", "transmission"},
+                {"SABnzbd", "sabnzbd"},
+                {"NZBGet", "nzbget"},
+                {"HTTP", "http"}
+              ]}
+              required
+            />
+            <.input field={@download_client_form[:host]} type="text" label="Host" required />
+            <.input field={@download_client_form[:port]} type="number" label="Port" required />
+            <.input field={@download_client_form[:username]} type="text" label="Username" />
+            <.input field={@download_client_form[:password]} type="password" label="Password" />
+            <.input field={@download_client_form[:api_key]} type="password" label="API Key" />
+            <.input field={@download_client_form[:url_base]} type="text" label="URL Base" />
+            <.input field={@download_client_form[:category]} type="text" label="Category" />
+            <.input
+              field={@download_client_form[:download_directory]}
+              type="text"
+              label="Download Directory"
+            />
+            <.input field={@download_client_form[:use_ssl]} type="checkbox" label="Use SSL" />
+            <.input
+              field={@download_client_form[:enabled]}
+              type="checkbox"
+              label="Enabled"
+              checked
+            />
+            <.input field={@download_client_form[:priority]} type="number" label="Priority" />
+          </div>
+
+          <div class="modal-action">
+            <button type="button" class="btn" phx-click="close_download_client_modal">
+              Cancel
+            </button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              phx-click="test_download_client_connection"
+              disabled={@testing_download_client_connection}
+            >
+              <%= if @testing_download_client_connection do %>
+                <span class="loading loading-spinner loading-sm"></span> Testing...
+              <% else %>
+                <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
+              <% end %>
+            </button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Indexer modal.
+  """
+  attr :indexer_form, :any, required: true
+  attr :indexer_mode, :atom, required: true
+  attr :testing_indexer_connection, :boolean, default: false
+
+  def indexer_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box max-w-2xl">
+        <h3 class="font-bold text-lg mb-4">
+          {if @indexer_mode == :new, do: "New Indexer", else: "Edit Indexer"}
+        </h3>
+
+        <.form
+          for={@indexer_form}
+          id="indexer-form"
+          phx-change="validate_indexer"
+          phx-submit="save_indexer"
+        >
+          <div class="space-y-4">
+            <.input field={@indexer_form[:name]} type="text" label="Name" required />
+            <.input
+              field={@indexer_form[:type]}
+              type="select"
+              label="Type"
+              options={[
+                {"Prowlarr", "prowlarr"},
+                {"Jackett", "jackett"},
+                {"Public", "public"}
+              ]}
+              required
+            />
+            <.input field={@indexer_form[:base_url]} type="text" label="Base URL" required />
+            <.input field={@indexer_form[:api_key]} type="password" label="API Key" />
+            <.input field={@indexer_form[:enabled]} type="checkbox" label="Enabled" checked />
+            <.input field={@indexer_form[:priority]} type="number" label="Priority" />
+          </div>
+
+          <div class="modal-action">
+            <button type="button" class="btn" phx-click="close_indexer_modal">Cancel</button>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              phx-click="test_indexer_connection"
+              disabled={@testing_indexer_connection}
+            >
+              <%= if @testing_indexer_connection do %>
+                <span class="loading loading-spinner loading-sm"></span> Testing...
+              <% else %>
+                <.icon name="hero-signal" class="w-4 h-4" /> Test Connection
+              <% end %>
+            </button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  Renders the Library Path modal.
+  """
+  attr :library_path_form, :any, required: true
+  attr :library_path_mode, :atom, required: true
+
+  def library_path_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">
+          {if @library_path_mode == :new, do: "New Library Path", else: "Edit Library Path"}
+        </h3>
+
+        <.form
+          for={@library_path_form}
+          id="library-path-form"
+          phx-change="validate_library_path"
+          phx-submit="save_library_path"
+        >
+          <div class="space-y-4">
+            <.input field={@library_path_form[:path]} type="text" label="Path" required />
+            <.input
+              field={@library_path_form[:type]}
+              type="select"
+              label="Type"
+              options={[{"Movies", "movies"}, {"TV Shows", "series"}, {"Mixed", "mixed"}]}
+              required
+            />
+            <.input
+              field={@library_path_form[:monitored]}
+              type="checkbox"
+              label="Monitored"
+              checked
+            />
+          </div>
+
+          <div class="modal-action">
+            <button type="button" class="btn" phx-click="close_library_path_modal">
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary">Save</button>
+          </div>
+        </.form>
+      </div>
+    </div>
+    """
+  end
+
+  # ============================================================================
+  # Helper Functions
+  # ============================================================================
+
+  defp health_badge(:healthy), do: "badge-success"
+  defp health_badge(:unhealthy), do: "badge-error"
+  defp health_badge(:unknown), do: "badge-warning"
+  defp health_badge(_), do: "badge-ghost"
+
+  defp health_status_badge_class(:healthy), do: "badge-success"
+  defp health_status_badge_class(:unhealthy), do: "badge-error"
+  defp health_status_badge_class(:unknown), do: "badge-ghost"
+
+  defp health_status_icon(:healthy), do: "hero-check-circle"
+  defp health_status_icon(:unhealthy), do: "hero-x-circle"
+  defp health_status_icon(:unknown), do: "hero-question-mark-circle"
+
+  defp health_status_label(:healthy), do: "Healthy"
+  defp health_status_label(:unhealthy), do: "Unhealthy"
+  defp health_status_label(:unknown), do: "Unknown"
+
+  defp format_indexer_type(type) when is_atom(type) do
+    type |> to_string() |> String.capitalize()
+  end
+
+  defp format_indexer_type(type), do: to_string(type)
+end
