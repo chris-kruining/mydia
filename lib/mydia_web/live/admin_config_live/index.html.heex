@@ -122,6 +122,13 @@
         quality_profile_active_tab={@quality_profile_active_tab}
       />
     <% end %>
+    <%!-- Quality Profile Delete Confirm Modal --%>
+    <%= if @show_delete_profile_modal do %>
+      <Components.quality_profile_delete_confirm_modal
+        profile_to_delete={@profile_to_delete}
+        affected_media_count={@affected_media_count}
+      />
+    <% end %>
     <%!-- Import Quality Profile Modal --%>
     <%= if assigns[:show_import_modal] do %>
       <Components.import_modal import_error={assigns[:import_error]} />

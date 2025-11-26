@@ -251,7 +251,7 @@ defmodule MydiaWeb.AddMediaLive.Index do
   defp load_toolbar_settings(socket, _media_type) do
     # Set sensible defaults - these persist while the user is on the page
     # The toolbar state is maintained in LiveView assigns
-    default_profile = List.first(socket.assigns.quality_profiles)
+    default_profile = get_default_quality_profile(socket.assigns.quality_profiles)
     default_path = List.first(socket.assigns.library_paths)
 
     socket
@@ -259,6 +259,21 @@ defmodule MydiaWeb.AddMediaLive.Index do
     |> assign(:toolbar_quality_profile_id, default_profile && default_profile.id)
     |> assign(:toolbar_monitored, true)
     |> assign(:toolbar_season_monitoring, "all")
+  end
+
+  # Gets the default quality profile from settings, or falls back to first available
+  defp get_default_quality_profile(profiles) do
+    # First try to get the configured default from settings
+    case Settings.get_default_quality_profile_id() do
+      nil ->
+        # No default configured, use first profile
+        List.first(profiles)
+
+      default_id ->
+        # Find the configured default in the profiles list
+        # Falls back to first if the configured default no longer exists
+        Enum.find(profiles, List.first(profiles), fn p -> p.id == default_id end)
+    end
   end
 
   defp build_config_from_toolbar(socket) do
@@ -366,7 +381,8 @@ defmodule MydiaWeb.AddMediaLive.Index do
       tmdb_id: metadata.id,
       imdb_id: metadata.imdb_id,
       metadata: metadata,
-      monitored: config.monitored
+      monitored: config.monitored,
+      quality_profile_id: config.quality_profile_id
     }
   end
 

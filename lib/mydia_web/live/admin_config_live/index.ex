@@ -247,6 +247,81 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
+  @impl true
+  def handle_event(
+        "update_select_setting",
+        %{"key" => key, "category" => category, "value" => value},
+        socket
+      ) do
+    # Convert category string to atom for schema compatibility
+    category_atom = category_string_to_atom(category)
+
+    # Special handling for quality profile ID - use dedicated setter
+    case key do
+      "media.default_quality_profile_id" ->
+        profile_id =
+          case value do
+            "" -> nil
+            id_str -> String.to_integer(id_str)
+          end
+
+        case Settings.set_default_quality_profile(profile_id) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Default quality profile updated")
+             |> load_configuration_data()}
+
+          {:error, changeset} ->
+            MydiaLogger.log_error(:liveview, "Failed to update select setting",
+              error: changeset,
+              error_details: inspect(changeset, pretty: true),
+              operation: :update_setting,
+              category: category,
+              setting_key: key,
+              user_id: socket.assigns.current_user.id
+            )
+
+            {:noreply,
+             socket
+             |> put_flash(:error, "Failed to update setting")}
+        end
+
+      _ ->
+        # Generic select setting handling (fallback for future select settings)
+        changeset =
+          validate_config_setting(%{
+            key: key,
+            value: value,
+            category: category_atom
+          })
+
+        if changeset.valid? do
+          validated_data = Ecto.Changeset.apply_changes(changeset)
+
+          validated_data_with_user =
+            Map.put(validated_data, :updated_by_id, socket.assigns.current_user.id)
+
+          case upsert_config_setting(validated_data_with_user) do
+            {:ok, _setting} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Setting updated successfully")
+               |> load_configuration_data()}
+
+            {:error, _changeset} ->
+              {:noreply,
+               socket
+               |> put_flash(:error, "Failed to update setting")}
+          end
+        else
+          {:noreply,
+           socket
+           |> put_flash(:error, "Invalid setting value")}
+        end
+    end
+  end
+
   ## Quality Profile Events
 
   @impl true
@@ -363,19 +438,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          |> load_configuration_data()}
 
       {:error, :profile_in_use} ->
-        MydiaLogger.log_warning(:liveview, "Attempted to delete quality profile in use",
-          operation: :delete_quality_profile,
-          profile_id: id,
-          profile_name: profile.name,
-          user_id: socket.assigns.current_user.id
-        )
+        # Show confirmation modal instead of error
+        affected_count = Settings.count_media_items_for_profile(id)
 
         {:noreply,
          socket
-         |> put_flash(
-           :error,
-           "Cannot delete quality profile - it is assigned to one or more media items. Please reassign those items first."
-         )}
+         |> assign(:show_delete_profile_modal, true)
+         |> assign(:profile_to_delete, profile)
+         |> assign(:affected_media_count, affected_count)}
 
       {:error, error} ->
         MydiaLogger.log_error(:liveview, "Failed to delete quality profile",
@@ -392,6 +462,55 @@ defmodule MydiaWeb.AdminConfigLive.Index do
          socket
          |> put_flash(:error, error_msg)}
     end
+  end
+
+  @impl true
+  def handle_event("confirm_delete_quality_profile", _params, socket) do
+    profile = socket.assigns.profile_to_delete
+
+    case Settings.force_delete_quality_profile(profile) do
+      {:ok, _deleted_profile} ->
+        MydiaLogger.log_info(:liveview, "Force deleted quality profile",
+          operation: :force_delete_quality_profile,
+          profile_id: profile.id,
+          profile_name: profile.name,
+          affected_media_count: socket.assigns.affected_media_count,
+          user_id: socket.assigns.current_user.id
+        )
+
+        {:noreply,
+         socket
+         |> assign(:show_delete_profile_modal, false)
+         |> assign(:profile_to_delete, nil)
+         |> assign(:affected_media_count, 0)
+         |> put_flash(:info, "Quality profile deleted and unassigned from media items")
+         |> load_configuration_data()}
+
+      {:error, error} ->
+        MydiaLogger.log_error(:liveview, "Failed to force delete quality profile",
+          error: error,
+          operation: :force_delete_quality_profile,
+          profile_id: profile.id,
+          profile_name: profile.name,
+          user_id: socket.assigns.current_user.id
+        )
+
+        error_msg = MydiaLogger.user_error_message(:force_delete_quality_profile, error)
+
+        {:noreply,
+         socket
+         |> assign(:show_delete_profile_modal, false)
+         |> put_flash(:error, error_msg)}
+    end
+  end
+
+  @impl true
+  def handle_event("cancel_delete_quality_profile", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_delete_profile_modal, false)
+     |> assign(:profile_to_delete, nil)
+     |> assign(:affected_media_count, 0)}
   end
 
   @impl true
@@ -1506,6 +1625,9 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     |> assign(:crash_report_stats, Mydia.CrashReporter.stats())
     |> assign(:queued_crash_reports, Mydia.CrashReporter.list_queued_reports())
     |> assign(:show_quality_profile_modal, false)
+    |> assign(:show_delete_profile_modal, false)
+    |> assign(:profile_to_delete, nil)
+    |> assign(:affected_media_count, 0)
     |> assign(:show_download_client_modal, false)
     |> assign(:show_indexer_modal, false)
     |> assign(:show_library_path_modal, false)
@@ -1626,6 +1748,14 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         }
       ],
       "Media" => [
+        %{
+          key: "media.default_quality_profile_id",
+          label: "Default Quality Profile",
+          type: :select,
+          value: Settings.get_default_quality_profile_id(),
+          source: get_source(nil, "media.default_quality_profile_id"),
+          options: build_quality_profile_options()
+        },
         %{
           key: "media.movies_path",
           label: "Movies Path",
@@ -1833,6 +1963,17 @@ defmodule MydiaWeb.AdminConfigLive.Index do
     end
   end
 
+  # Builds a list of quality profile options for the default quality profile dropdown
+  # Returns [{id, name}, ...] with nil option first for "Any Quality"
+  defp build_quality_profile_options do
+    profiles = Settings.list_quality_profiles()
+
+    [
+      {nil, "Any Quality (first available)"}
+      | Enum.map(profiles, fn p -> {p.id, p.name} end)
+    ]
+  end
+
   # Transforms quality profile form params to match the schema structure
   defp transform_quality_profile_params(params) do
     # Handle qualities array - if empty or nil, set to empty list to satisfy validation
@@ -1845,6 +1986,7 @@ defmodule MydiaWeb.AdminConfigLive.Index do
       end
 
     # Extract and transform quality_standards
+    # Only include if there's actual data (not nil/empty) to avoid overwriting existing data
     quality_standards =
       if params["quality_standards"] do
         transform_quality_standards(params["quality_standards"])
@@ -1852,33 +1994,32 @@ defmodule MydiaWeb.AdminConfigLive.Index do
         nil
       end
 
-    # Extract and transform metadata_preferences
-    metadata_preferences =
-      if params["metadata_preferences"] do
-        transform_metadata_preferences(params["metadata_preferences"])
-      else
-        nil
-      end
-
-    # Build the final params map
-    %{
+    # Build the final params map, excluding nil quality_standards to preserve existing data
+    base_params = %{
       "name" => params["name"],
       "description" => params["description"],
-      "qualities" => qualities,
-      "upgrades_allowed" =>
-        params["upgrades_allowed"] == "true" || params["upgrades_allowed"] == true,
-      "upgrade_until_quality" => params["upgrade_until_quality"],
-      "quality_standards" => quality_standards,
-      "metadata_preferences" => metadata_preferences
+      "qualities" => qualities
     }
+
+    # Only include quality_standards if it has actual data
+    if quality_standards do
+      Map.put(base_params, "quality_standards", quality_standards)
+    else
+      base_params
+    end
   end
 
   defp transform_quality_standards(standards) when is_map(standards) do
     standards
     |> Enum.reduce(%{}, fn {key, value}, acc ->
       case transform_quality_standard_value(key, value) do
-        nil -> acc
-        transformed_value -> Map.put(acc, key, transformed_value)
+        nil ->
+          acc
+
+        # Convert string keys to atoms for consistency with how templates access them
+        transformed_value ->
+          atom_key = if is_binary(key), do: String.to_atom(key), else: key
+          Map.put(acc, atom_key, transformed_value)
       end
     end)
     |> case do
@@ -1939,65 +2080,6 @@ defmodule MydiaWeb.AdminConfigLive.Index do
   end
 
   defp transform_quality_standard_value(_key, value), do: value
-
-  defp transform_metadata_preferences(prefs) when is_map(prefs) do
-    prefs
-    |> Enum.reduce(%{}, fn {key, value}, acc ->
-      # Map fallback_languages_string to fallback_languages
-      actual_key = if key == "fallback_languages_string", do: "fallback_languages", else: key
-
-      case transform_metadata_pref_value(key, value) do
-        nil -> acc
-        transformed_value -> Map.put(acc, actual_key, transformed_value)
-      end
-    end)
-    |> case do
-      empty when empty == %{} -> nil
-      non_empty -> non_empty
-    end
-  end
-
-  defp transform_metadata_pref_value(_key, ""), do: nil
-  defp transform_metadata_pref_value(_key, nil), do: nil
-
-  # Handle fallback_languages_string -> convert to fallback_languages array
-  defp transform_metadata_pref_value("fallback_languages_string", value) when is_binary(value) do
-    value
-    |> String.split(",")
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> case do
-      [] -> nil
-      langs -> langs
-    end
-  end
-
-  defp transform_metadata_pref_value(key, value)
-       when key in ["provider_priority", "fallback_languages"] do
-    case value do
-      list when is_list(list) -> list
-      str when is_binary(str) -> String.split(str, ",") |> Enum.map(&String.trim/1)
-      _ -> nil
-    end
-  end
-
-  defp transform_metadata_pref_value("auto_refresh_interval_hours", value) do
-    case Integer.parse(value) do
-      {int, ""} -> int
-      _ -> nil
-    end
-  end
-
-  defp transform_metadata_pref_value(key, value)
-       when key in [
-              "auto_fetch_enabled",
-              "fallback_on_provider_failure",
-              "skip_unavailable_providers"
-            ] do
-    value == "true" || value == true
-  end
-
-  defp transform_metadata_pref_value(_key, value), do: value
 
   # Helper function for export MIME types
   defp get_export_mime_type(:json), do: "application/json"

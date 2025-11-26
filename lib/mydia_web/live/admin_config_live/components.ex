@@ -364,6 +364,25 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   defp setting_value_control(assigns) do
     ~H"""
     <%= cond do %>
+      <% @setting.type == :select -> %>
+        <%= if @editable do %>
+          <select
+            class="select select-sm select-bordered w-full sm:w-56"
+            phx-change="update_select_setting"
+            phx-value-key={@setting.key}
+            phx-value-category={@category}
+            name="value"
+          >
+            <%= for {value, label} <- @setting.options do %>
+              <option value={value || ""} selected={@setting.value == value}>
+                {label}
+              </option>
+            <% end %>
+          </select>
+        <% else %>
+          <% label = Enum.find_value(@setting.options, fn {v, l} -> v == @setting.value && l end) %>
+          <kbd class="kbd kbd-sm font-mono">{label || "Not set"}</kbd>
+        <% end %>
       <% is_boolean(@setting.value) -> %>
         <%= if @editable do %>
           <label class="label cursor-pointer gap-2">
@@ -583,7 +602,6 @@ defmodule MydiaWeb.AdminConfigLive.Components do
                     class="btn btn-sm btn-ghost join-item text-error"
                     phx-click="delete_quality_profile"
                     phx-value-id={profile.id}
-                    data-confirm="Are you sure you want to delete this quality profile?"
                     title="Delete"
                   >
                     <.icon name="hero-trash" class="w-4 h-4" />
@@ -807,7 +825,7 @@ defmodule MydiaWeb.AdminConfigLive.Components do
         <div class="alert alert-warning">
           <.icon name="hero-exclamation-triangle" class="w-5 h-5" />
           <div>
-            <div class="font-medium">Cardigann indexers are experimental</div>
+            <div class="font-medium">Library indexers are experimental</div>
             <div class="text-sm opacity-80">
               Only a limited number of indexers have been tested. You may encounter issues with untested indexers.
               Please report any problems as GitHub issues.
@@ -1210,6 +1228,48 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   # ============================================================================
 
   @doc """
+  Renders the Quality Profile delete confirmation modal.
+
+  Shows when attempting to delete a profile that is assigned to media items,
+  allowing the user to force delete and unassign from all affected items.
+  """
+  attr :profile_to_delete, :map, required: true
+  attr :affected_media_count, :integer, required: true
+
+  def quality_profile_delete_confirm_modal(assigns) do
+    ~H"""
+    <div class="modal modal-open">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg mb-4">Delete Quality Profile?</h3>
+        <p class="py-4">
+          The quality profile <span class="font-semibold">{@profile_to_delete.name}</span>
+          is currently assigned to media items.
+        </p>
+        <div class="bg-base-200 p-3 rounded-box mb-4">
+          <p class="text-sm">
+            <span class="font-semibold">Affected media items:</span>
+            <span class="badge badge-warning badge-sm ml-2">{@affected_media_count}</span>
+          </p>
+        </div>
+        <p class="text-warning text-sm mb-4">
+          <.icon name="hero-exclamation-triangle" class="w-4 h-4 inline" />
+          Deleting this profile will unassign it from all affected media items. They will have no quality profile assigned.
+        </p>
+        <div class="modal-action">
+          <button type="button" phx-click="cancel_delete_quality_profile" class="btn btn-ghost">
+            Cancel
+          </button>
+          <button type="button" phx-click="confirm_delete_quality_profile" class="btn btn-error">
+            Delete Anyway
+          </button>
+        </div>
+      </div>
+      <div class="modal-backdrop" phx-click="cancel_delete_quality_profile"></div>
+    </div>
+    """
+  end
+
+  @doc """
   Renders the Quality Profile modal.
   """
   attr :quality_profile_form, :any, required: true
@@ -1246,15 +1306,6 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           >
             Quality Standards
           </button>
-          <button
-            type="button"
-            role="tab"
-            class={["tab", @quality_profile_active_tab == "metadata" && "tab-active"]}
-            phx-click="change_quality_profile_tab"
-            phx-value-tab="metadata"
-          >
-            Metadata Preferences
-          </button>
         </div>
 
         <.form
@@ -1263,20 +1314,15 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           phx-change="validate_quality_profile"
           phx-submit="save_quality_profile"
         >
-          <%!-- Basic Info Tab --%>
-          <%= if @quality_profile_active_tab == "basic" do %>
+          <%!-- Basic Info Tab - Always rendered, hidden when not active --%>
+          <div class={if @quality_profile_active_tab != "basic", do: "hidden"}>
             <.quality_profile_basic_tab form={@quality_profile_form} />
-          <% end %>
+          </div>
 
-          <%!-- Quality Standards Tab --%>
-          <%= if @quality_profile_active_tab == "standards" do %>
+          <%!-- Quality Standards Tab - Always rendered, hidden when not active --%>
+          <div class={if @quality_profile_active_tab != "standards", do: "hidden"}>
             <.quality_profile_standards_tab form={@quality_profile_form} />
-          <% end %>
-
-          <%!-- Metadata Preferences Tab --%>
-          <%= if @quality_profile_active_tab == "metadata" do %>
-            <.quality_profile_metadata_tab form={@quality_profile_form} />
-          <% end %>
+          </div>
 
           <div class="modal-action">
             <button type="button" class="btn" phx-click="close_quality_profile_modal">
@@ -1349,27 +1395,6 @@ defmodule MydiaWeb.AdminConfigLive.Components do
           </label>
         <% end %>
       </div>
-
-      <%!-- Upgrade Settings --%>
-      <div class="divider">Upgrade Settings</div>
-
-      <.input
-        field={@form[:upgrades_allowed]}
-        type="checkbox"
-        label="Allow Quality Upgrades"
-      />
-
-      <%= if Ecto.Changeset.get_field(@form.source, :upgrades_allowed, true) do %>
-        <.input
-          field={@form[:upgrade_until_quality]}
-          type="select"
-          label="Upgrade Until Quality"
-          options={[
-            {"Don't upgrade", nil}
-            | Enum.map(["480p", "576p", "720p", "1080p", "2160p", "4320p"], &{&1, &1})
-          ]}
-        />
-      <% end %>
     </div>
     """
   end
@@ -1865,322 +1890,6 @@ defmodule MydiaWeb.AdminConfigLive.Components do
   end
 
   @doc """
-  Renders the Metadata Preferences tab content for the Quality Profile modal.
-  """
-  attr :form, :any, required: true
-
-  def quality_profile_metadata_tab(assigns) do
-    ~H"""
-    <div class="space-y-6">
-      <div class="alert alert-info">
-        <.icon name="hero-information-circle" class="w-5 h-5" />
-        <span class="text-sm">
-          Configure metadata provider preferences, language settings, and auto-fetch options.
-        </span>
-      </div>
-
-      <%!-- Provider Priority --%>
-      <div class="form-control">
-        <label class="label">
-          <span class="label-text font-semibold">Provider Priority</span>
-          <span class="label-text-alt text-xs">Providers are tried in order</span>
-        </label>
-        <div class="space-y-2">
-          <%= for provider <- ["metadata_relay", "tvdb", "tmdb", "omdb"] do %>
-            <label class="label cursor-pointer justify-start gap-2 bg-base-200 rounded-lg px-4 py-2">
-              <input
-                type="checkbox"
-                name="quality_profile[metadata_preferences][provider_priority][]"
-                value={provider}
-                checked={
-                  provider in (get_in(
-                                 Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                                 [:provider_priority]
-                               ) || [])
-                }
-                class="checkbox checkbox-sm checkbox-primary"
-              />
-              <span class="label-text flex-1 font-medium">
-                {provider
-                |> String.split("_")
-                |> Enum.map(&String.capitalize/1)
-                |> Enum.join(" ")}
-              </span>
-            </label>
-          <% end %>
-        </div>
-        <label class="label">
-          <span class="label-text-alt text-xs">
-            Select and order providers. Checked providers will be tried in the order they appear.
-          </span>
-        </label>
-      </div>
-
-      <%!-- Language & Region --%>
-      <div class="divider">Language & Region</div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">Language</span>
-          </label>
-          <input
-            type="text"
-            name="quality_profile[metadata_preferences][language]"
-            placeholder="en-US"
-            value={
-              get_in(
-                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                [:language]
-              )
-            }
-            class="input input-bordered w-full"
-          />
-          <label class="label">
-            <span class="label-text-alt text-xs">
-              Language code (e.g., en-US, ja, fr-FR)
-            </span>
-          </label>
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">Region</span>
-          </label>
-          <input
-            type="text"
-            name="quality_profile[metadata_preferences][region]"
-            placeholder="US"
-            maxlength="2"
-            value={
-              get_in(
-                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                [:region]
-              )
-            }
-            class="input input-bordered w-full"
-          />
-          <label class="label">
-            <span class="label-text-alt text-xs">
-              2-letter country code (e.g., US, UK, JP)
-            </span>
-          </label>
-        </div>
-      </div>
-
-      <div class="form-control">
-        <label class="label">
-          <span class="label-text">Fallback Languages</span>
-        </label>
-        <input
-          type="text"
-          name="quality_profile[metadata_preferences][fallback_languages_string]"
-          placeholder="en, ja, fr"
-          value={
-            case get_in(
-                   Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                   [:fallback_languages]
-                 ) do
-              nil -> ""
-              langs when is_list(langs) -> Enum.join(langs, ", ")
-              _ -> ""
-            end
-          }
-          class="input input-bordered w-full"
-        />
-        <label class="label">
-          <span class="label-text-alt text-xs">
-            Comma-separated list of language codes to try if primary language is unavailable
-          </span>
-        </label>
-      </div>
-
-      <%!-- Auto-Fetch Settings --%>
-      <div class="divider">Auto-Fetch Settings</div>
-
-      <div class="form-control">
-        <label class="label cursor-pointer justify-start gap-3">
-          <input
-            type="checkbox"
-            name="quality_profile[metadata_preferences][auto_fetch_enabled]"
-            value="true"
-            checked={
-              get_in(
-                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                [:auto_fetch_enabled]
-              ) == true
-            }
-            class="checkbox checkbox-primary"
-          />
-          <div>
-            <span class="label-text font-semibold">Enable Auto-Fetch</span>
-            <p class="text-xs text-base-content/70">
-              Automatically fetch and update metadata periodically
-            </p>
-          </div>
-        </label>
-      </div>
-
-      <%= if get_in(
-               Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-               [:auto_fetch_enabled]
-             ) == true do %>
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">Auto-Refresh Interval (hours)</span>
-          </label>
-          <input
-            type="number"
-            name="quality_profile[metadata_preferences][auto_refresh_interval_hours]"
-            placeholder="168"
-            step="1"
-            min="1"
-            value={
-              get_in(
-                Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                [:auto_refresh_interval_hours]
-              ) || 168
-            }
-            class="input input-bordered w-full max-w-xs"
-          />
-          <label class="label">
-            <span class="label-text-alt text-xs">
-              How often to refresh metadata (default: 168 hours = 7 days)
-            </span>
-          </label>
-        </div>
-      <% end %>
-
-      <%!-- Fallback Behavior --%>
-      <div class="divider">Fallback Behavior</div>
-
-      <div class="space-y-3">
-        <div class="form-control">
-          <label class="label cursor-pointer justify-start gap-3">
-            <input
-              type="checkbox"
-              name="quality_profile[metadata_preferences][fallback_on_provider_failure]"
-              value="true"
-              checked={
-                get_in(
-                  Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                  [:fallback_on_provider_failure]
-                ) == true
-              }
-              class="checkbox checkbox-primary"
-            />
-            <div>
-              <span class="label-text font-semibold">Fallback on Provider Failure</span>
-              <p class="text-xs text-base-content/70">
-                Try next provider if current one fails
-              </p>
-            </div>
-          </label>
-        </div>
-
-        <div class="form-control">
-          <label class="label cursor-pointer justify-start gap-3">
-            <input
-              type="checkbox"
-              name="quality_profile[metadata_preferences][skip_unavailable_providers]"
-              value="true"
-              checked={
-                get_in(
-                  Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                  [:skip_unavailable_providers]
-                ) == true
-              }
-              class="checkbox checkbox-primary"
-            />
-            <div>
-              <span class="label-text font-semibold">Skip Unavailable Providers</span>
-              <p class="text-xs text-base-content/70">
-                Automatically skip providers that are down or unreachable
-              </p>
-            </div>
-          </label>
-        </div>
-      </div>
-
-      <%!-- Conflict Resolution --%>
-      <div class="divider">Conflict Resolution</div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-semibold">Conflict Resolution</span>
-          </label>
-          <select
-            name="quality_profile[metadata_preferences][conflict_resolution]"
-            class="select select-bordered w-full"
-          >
-            <option value="">Choose strategy...</option>
-            <%= for {label, value} <- [
-                  {"Prefer Newer", "prefer_newer"},
-                  {"Prefer Older", "prefer_older"},
-                  {"Manual", "manual"}
-                ] do %>
-              <option
-                value={value}
-                selected={
-                  value ==
-                    get_in(
-                      Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                      [:conflict_resolution]
-                    )
-                }
-              >
-                {label}
-              </option>
-            <% end %>
-          </select>
-          <label class="label">
-            <span class="label-text-alt text-xs">
-              How to handle conflicting metadata from different providers
-            </span>
-          </label>
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-semibold">Merge Strategy</span>
-          </label>
-          <select
-            name="quality_profile[metadata_preferences][merge_strategy]"
-            class="select select-bordered w-full"
-          >
-            <option value="">Choose strategy...</option>
-            <%= for {label, value} <- [
-                  {"Union (combine all)", "union"},
-                  {"Intersection (only common)", "intersection"},
-                  {"Priority (first provider wins)", "priority"}
-                ] do %>
-              <option
-                value={value}
-                selected={
-                  value ==
-                    get_in(
-                      Ecto.Changeset.get_field(@form.source, :metadata_preferences, %{}),
-                      [:merge_strategy]
-                    )
-                }
-              >
-                {label}
-              </option>
-            <% end %>
-          </select>
-          <label class="label">
-            <span class="label-text-alt text-xs">
-              How to merge metadata when multiple providers return data
-            </span>
-          </label>
-        </div>
-      </div>
-    </div>
-    """
-  end
-
-  @doc """
   Renders the Import Quality Profile modal.
   """
   attr :import_error, :string, default: nil
@@ -2269,6 +1978,13 @@ defmodule MydiaWeb.AdminConfigLive.Components do
             phx-value-category="trash_guides"
           >
             TRaSH Guides
+          </button>
+          <button
+            class={["tab", @selected_category == :profilarr && "tab-active"]}
+            phx-click="filter_presets"
+            phx-value-category="profilarr"
+          >
+            Profilarr
           </button>
           <button
             class={["tab", @selected_category == :storage_optimized && "tab-active"]}
