@@ -203,6 +203,40 @@ defmodule Mydia.Settings do
   end
 
   @doc """
+  Returns the count of media items using a quality profile.
+  """
+  def count_media_items_for_profile(profile_id) do
+    alias Mydia.Media.MediaItem
+
+    MediaItem
+    |> where([m], m.quality_profile_id == ^profile_id)
+    |> Repo.aggregate(:count)
+  end
+
+  @doc """
+  Force deletes a quality profile, unassigning it from any media items first.
+
+  This sets `quality_profile_id` to nil on all media items using this profile,
+  then deletes the profile.
+  """
+  def force_delete_quality_profile(%QualityProfile{} = quality_profile) do
+    alias Mydia.Media.MediaItem
+
+    Repo.transaction(fn ->
+      # Unassign the profile from all media items
+      MediaItem
+      |> where([m], m.quality_profile_id == ^quality_profile.id)
+      |> Repo.update_all(set: [quality_profile_id: nil])
+
+      # Delete the profile
+      case Repo.delete(quality_profile) do
+        {:ok, deleted_profile} -> deleted_profile
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+  end
+
+  @doc """
   Returns an `%Ecto.Changeset{}` for tracking quality profile changes.
   """
   def change_quality_profile(%QualityProfile{} = quality_profile, attrs \\ %{}) do
@@ -1553,6 +1587,94 @@ defmodule Mydia.Settings do
   """
   def get_oban_config do
     get_runtime_config().oban
+  end
+
+  @doc """
+  Gets the default quality profile ID from settings.
+
+  Returns the ID as a string (UUID) if set, or nil if not configured.
+
+  ## Examples
+
+      iex> get_default_quality_profile_id()
+      "550e8400-e29b-41d4-a716-446655440000"
+
+      iex> get_default_quality_profile_id()
+      nil
+  """
+  def get_default_quality_profile_id do
+    case get_config_setting_by_key("media.default_quality_profile_id") do
+      %ConfigSetting{value: value} when is_binary(value) and value != "" ->
+        value
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc """
+  Gets the default quality profile struct.
+
+  Returns the full QualityProfile struct if a default is set and exists,
+  or nil if not configured or the profile doesn't exist.
+
+  ## Examples
+
+      iex> get_default_quality_profile()
+      %QualityProfile{id: 42, name: "HD-1080p", ...}
+
+      iex> get_default_quality_profile()
+      nil
+  """
+  def get_default_quality_profile do
+    case get_default_quality_profile_id() do
+      nil -> nil
+      id -> Repo.get(QualityProfile, id)
+    end
+  end
+
+  @doc """
+  Sets the default quality profile.
+
+  Accepts a quality profile ID (string UUID or integer) or nil to clear the default.
+
+  ## Examples
+
+      iex> set_default_quality_profile("550e8400-e29b-41d4-a716-446655440000")
+      {:ok, %ConfigSetting{}}
+
+      iex> set_default_quality_profile(nil)
+      {:ok, %ConfigSetting{}}
+  """
+  def set_default_quality_profile(nil) do
+    case get_config_setting_by_key("media.default_quality_profile_id") do
+      nil ->
+        {:ok, nil}
+
+      existing ->
+        update_config_setting(existing, %{value: ""})
+    end
+  end
+
+  def set_default_quality_profile(profile_id) when is_binary(profile_id) do
+    attrs = %{
+      key: "media.default_quality_profile_id",
+      value: profile_id,
+      category: :media,
+      description: "Default quality profile for adding media"
+    }
+
+    case get_config_setting_by_key("media.default_quality_profile_id") do
+      nil ->
+        create_config_setting(attrs)
+
+      existing ->
+        update_config_setting(existing, attrs)
+    end
+  end
+
+  def set_default_quality_profile(profile_id) when is_integer(profile_id) do
+    set_default_quality_profile(to_string(profile_id))
   end
 
   ## Private Functions
