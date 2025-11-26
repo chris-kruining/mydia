@@ -60,7 +60,8 @@ defmodule Mydia.Library.FileParser.V2 do
       |TrueHD(?:[\s.]\d+[\s.]?\d*)?        # TrueHD, TrueHD 7.1, TrueHD 7 1
       |Atmos
       |AAC-LC(?:[\s.]\d+[\s.]?\d*)?        # AAC-LC (must be before AAC)
-      |AAC(?:[\s.]\d+[\s.]?\d*)?           # AAC, AAC 2.0
+      |AAC[\s.]?\d+[\s.]?\d*               # AAC2.0, AAC 2.0, AAC 2 0 (with numbers)
+      |AAC                                 # Plain AAC (after AAC with numbers)
       |AC3
       |OPUS(?:\d+[\s.]?\d*)?               # OPUS, OPUS2.0
     )
@@ -82,14 +83,15 @@ defmodule Mydia.Library.FileParser.V2 do
   @resolution_pattern ~r/\b(?:\d{3,4}[pP]|4K|8K|UHD)\b/i
 
   # Source pattern - order matters: match longer patterns first (WEB-DL before WEB)
+  # WEB is included but validated in extract_source to avoid matching titles like "Madame.Web"
   @source_pattern ~r/
     \b
     (?:
       REMUX
       |BluRay|BDRip|BRRip
-      |WEB-DL                            # WEB-DL (must be before WEB)
-      |WEBRip                            # WEBRip (must be before WEB)
-      |WEB                               # Plain WEB
+      |WEB-DL                            # WEB-DL (specific, safe to match)
+      |WEBRip                            # WEBRip (specific, safe to match)
+      |WEB                               # Plain WEB (validated in handler)
       |HDTV
       |DVDScr                            # DVDScr (screener, must be before DVDRip)
       |DVDRip                            # DVDRip (must be before DVD)
@@ -98,14 +100,18 @@ defmodule Mydia.Library.FileParser.V2 do
     \b
   /xi
 
-  @hdr_pattern ~r/(?:\bHDR10\+|\b(?:DolbyVision|DoVi|DV|HDR10|HDR)\b)/i
+  # HDR pattern - includes Dolby Vision with space and DV abbreviation
+  @hdr_pattern ~r/(?:\bHDR10\+|\b(?:DolbyVision|Dolby[\s.]Vision|DoVi|DV|HDR10|HDR)\b)/i
+  # HDR profile pattern (P5, P8, etc.)
+  @hdr_profile_pattern ~r/\bP[0-9]+\b/i
 
   # Additional noise patterns
   @bit_depth_pattern ~r/\b(8|10|12)[\s-]?bits?\b/i
   @encoder_pattern ~r/[-_. ](NVENC|QSV|AMF|VCE|VideoToolbox)\b/i
   # Match any content in square brackets (typically quality/metadata tags, not titles)
   @bracket_contents_pattern ~r/\[[^\]]+\]/i
-  @extra_noise_pattern ~r/\b(PROPER|REPACK|INTERNAL|LIMITED|UNRATED|DIRECTORS?\.CUT|EXTENDED|THEATRICAL|AMZN|NF|ATVP|HYBRID)\b/i
+  # Streaming service identifiers and other release noise
+  @extra_noise_pattern ~r/\b(PROPER|REPACK|INTERNAL|LIMITED|UNRATED|DIRECTORS?\.CUT|EXTENDED|THEATRICAL|HYBRID|AMZN|ATVP|DSNP|HMAX|HULU|NF|PMTP|PCOK|STAN|iT|MA)\b/i
   @audio_channels_pattern ~r/\b[257]\s+1\b/i
   @vmaf_pattern ~r/\bVMAF\d+(?:\.\d+)?\b/i
 
@@ -454,6 +460,12 @@ defmodule Mydia.Library.FileParser.V2 do
         handler: &extract_and_discard/3
       },
       %{
+        name: :hdr_profile,
+        type: :noise,
+        regex: @hdr_profile_pattern,
+        handler: &extract_and_discard/3
+      },
+      %{
         name: :bracket_contents,
         type: :noise,
         regex: @bracket_contents_pattern,
@@ -483,10 +495,18 @@ defmodule Mydia.Library.FileParser.V2 do
   end
 
   defp extract_all_patterns(text) do
+    # Store original text in metadata for handlers that need position context
+    initial_metadata = %{_original_text: text}
+
     # Reduce over all patterns, extracting and removing matches sequentially
-    Enum.reduce(extraction_patterns(), {%{}, text}, fn pattern, {metadata, remaining_text} ->
-      extract_pattern(pattern, metadata, remaining_text)
-    end)
+    {metadata, remaining} =
+      Enum.reduce(extraction_patterns(), {initial_metadata, text}, fn pattern,
+                                                                      {metadata, remaining_text} ->
+        extract_pattern(pattern, metadata, remaining_text)
+      end)
+
+    # Remove internal metadata before returning
+    {Map.delete(metadata, :_original_text), remaining}
   end
 
   defp extract_pattern(%{regex: :tv_patterns}, metadata, text) do
@@ -708,8 +728,50 @@ defmodule Mydia.Library.FileParser.V2 do
     end
   end
 
-  def extract_source(match, _text, _metadata) do
-    match
+  def extract_source(match, _text, metadata) do
+    # For standalone "WEB", validate it's not part of the title (like "Madame.Web")
+    # by checking if it appears after quality markers in the original text
+    if String.upcase(match) == "WEB" do
+      # Use original text from metadata for position checking
+      original_text = Map.get(metadata, :_original_text, "")
+      validate_web_source(original_text)
+    else
+      match
+    end
+  end
+
+  # Validates WEB is a source and not part of the title by checking position
+  # relative to quality markers (year, resolution, episode markers)
+  defp validate_web_source(text) do
+    # Find the position of WEB in the text
+    web_pos = find_word_position(text, ~r/\bWEB\b/i)
+
+    # Find positions of quality markers that would indicate WEB is after them
+    year_pos = find_word_position(text, ~r/[\s._-](19\d{2}|20\d{2})(?:[\s._-]|$)/)
+    resolution_pos = find_word_position(text, ~r/\b\d{3,4}[pP]\b/)
+    episode_pos = find_word_position(text, ~r/[. _-]S\d{1,2}E\d{1,2}/i)
+
+    # WEB is valid if it appears after any quality marker
+    quality_marker_pos =
+      [year_pos, resolution_pos, episode_pos]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.min(fn -> nil end)
+
+    cond do
+      # No quality markers found - WEB could be part of title, reject it
+      is_nil(quality_marker_pos) -> nil
+      # WEB appears after quality marker - it's a source
+      web_pos > quality_marker_pos -> "WEB"
+      # WEB appears before quality markers - likely part of title
+      true -> nil
+    end
+  end
+
+  defp find_word_position(text, pattern) do
+    case Regex.run(pattern, text, return: :index) do
+      [{pos, _} | _] -> pos
+      _ -> nil
+    end
   end
 
   def extract_codec(match, _text, _metadata) do
@@ -722,14 +784,25 @@ defmodule Mydia.Library.FileParser.V2 do
   end
 
   def extract_hdr(match, _text, _metadata) do
-    # Normalize HDR10+ correctly
+    # Normalize HDR formats
     cleaned_match = String.trim(match)
 
-    if String.contains?(cleaned_match, "HDR10+") ||
-         String.contains?(cleaned_match, "HDR10 ") do
-      "HDR10+"
-    else
-      cleaned_match
+    cond do
+      String.contains?(cleaned_match, "HDR10+") ||
+          String.contains?(cleaned_match, "HDR10 ") ->
+        "HDR10+"
+
+      String.match?(cleaned_match, ~r/Dolby[\s.]?Vision/i) ->
+        "DolbyVision"
+
+      String.match?(cleaned_match, ~r/^DoVi$/i) ->
+        "DolbyVision"
+
+      String.match?(cleaned_match, ~r/^DV$/i) ->
+        "DolbyVision"
+
+      true ->
+        cleaned_match
     end
   end
 

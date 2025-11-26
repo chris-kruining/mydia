@@ -56,21 +56,28 @@ defmodule Mydia.Library.FileParser do
   @resolution_pattern ~r/\b(?:\d{3,4}[pP]|4K|8K|UHD)\b/i
 
   # Source pattern
+  # Note: WEB-DL and WEBRip must come before WEB to avoid partial matching
+  # Standalone WEB should only match when preceded by resolution or other quality markers
   @source_pattern ~r/
     \b
     (?:
       REMUX
       |BluRay|BDRip|BRRip
-      |WEB(?:-DL|Rip)?                   # WEB, WEB-DL, WEBRip
+      |WEB-DL|WEBRip                     # WEB-DL, WEBRip (most specific)
       |HDTV
       |DVD(?:Rip)?                       # DVD, DVDRip
     )
     \b
   /xi
+  # Separate pattern for standalone WEB that requires quality context
+  # This prevents matching "Web" in titles like "Madame Web"
+  @web_source_pattern ~r/(?:\d{3,4}p|UHD|4K)\s+WEB\b/i
 
   # HDR format pattern - handle HDR10+ (+ can be literal or space after normalization)
   # Match HDR10+ without word boundary after + since + is not a word character
-  @hdr_pattern ~r/(?:\bHDR10\+|\b(?:DolbyVision|DoVi|HDR10|HDR)\b)/i
+  # DV is a common abbreviation for Dolby Vision
+  # Order matters: DolbyVision > DoVi > DV > HDR10+ > HDR10 > HDR (most specific first)
+  @hdr_pattern ~r/(?:\bHDR10\+|\b(?:DolbyVision|Dolby[\s.]Vision|DoVi|DV|HDR10|HDR)\b)/i
 
   # Additional patterns to strip
   @bit_depth_pattern ~r/\b(8|10|12)[\s-]?bits?\b/i
@@ -78,6 +85,12 @@ defmodule Mydia.Library.FileParser do
   # Only remove brackets that contain quality info (not years)
   @bracket_contents_pattern ~r/\[(HDR|HDR10|HDR10\+|DolbyVision|DoVi|10bit|8bit|x265|x264|HEVC|AVC|2160p|1080p|720p)[^\]]*\]/i
   @extra_noise_pattern ~r/\b(PROPER|REPACK|INTERNAL|LIMITED|UNRATED|DIRECTORS?\.CUT|EXTENDED|THEATRICAL)\b/i
+  # Streaming service identifiers that should be stripped from titles
+  @streaming_service_pattern ~r/\b(AMZN|ATVP|DSNP|HMAX|HULU|NF|PMTP|PCOK|STAN|iT|MA)\b/i
+  # Multi-language/region identifiers
+  @language_pattern ~r/\b(MULTi|MULTI|DUAL|DUBBED|SUBBED|KORSUB|FRENCH|TRUEFRENCH|GERMAN|SPANISH|ITALIAN|JAPANESE)\b/i
+  # HDR profile numbers (P5, P8, etc.) and other quality indicators to strip
+  @hdr_profile_pattern ~r/\bP[0-9]+\b/i
   # Audio channel indicators (after dot normalization)
   @audio_channels_pattern ~r/\b[257]\s+1\b/i
   # VMAF quality metric pattern (e.g., VMAF96, VMAF95.5)
@@ -314,11 +327,31 @@ defmodule Mydia.Library.FileParser do
   defp extract_quality(text) do
     %{
       resolution: extract_resolution(text),
-      source: extract_with_pattern(text, @source_pattern),
+      source: extract_source(text),
       codec: extract_codec(text),
       hdr_format: extract_hdr(text),
       audio: extract_audio(text)
     }
+  end
+
+  # Source extraction - handles both explicit patterns and standalone WEB with context
+  defp extract_source(text) do
+    # First try explicit patterns (WEB-DL, WEBRip, BluRay, etc.)
+    case Regex.run(@source_pattern, text) do
+      [match | _] ->
+        match
+
+      nil ->
+        # Try standalone WEB only if it follows resolution
+        case Regex.run(@web_source_pattern, text) do
+          [match | _] ->
+            # Extract just "WEB" from the match
+            if String.contains?(String.upcase(match), "WEB"), do: "WEB", else: nil
+
+          nil ->
+            nil
+        end
+    end
   end
 
   # Resolution extraction - normalize case to lowercase 'p'
@@ -356,19 +389,23 @@ defmodule Mydia.Library.FileParser do
     end
   end
 
-  # HDR extraction - normalize HDR10+ correctly
+  # HDR extraction - normalize HDR formats correctly
   defp extract_hdr(text) do
     case Regex.run(@hdr_pattern, text) do
       [match | _] ->
-        # Normalize HDR10+ (+ can be literal or space after normalization)
-        # Check if the match contains "HDR10" followed by + or space
         cleaned_match = String.trim(match)
 
-        if String.contains?(cleaned_match, "HDR10+") ||
-             String.contains?(cleaned_match, "HDR10 ") do
-          "HDR10+"
-        else
-          cleaned_match
+        # Normalize various formats to consistent names
+        cond do
+          String.contains?(cleaned_match, "HDR10+") ||
+              String.contains?(cleaned_match, "HDR10 ") ->
+            "HDR10+"
+
+          String.match?(cleaned_match, ~r/Dolby[\s.]?Vision/i) ->
+            "DolbyVision"
+
+          true ->
+            cleaned_match
         end
 
       nil ->
@@ -403,14 +440,6 @@ defmodule Mydia.Library.FileParser do
     end
   end
 
-  # Generic pattern extraction (for source and others)
-  defp extract_with_pattern(text, pattern) do
-    case Regex.run(pattern, text) do
-      [match | _] -> match
-      nil -> nil
-    end
-  end
-
   defp extract_release_group(text) do
     case Regex.run(@release_group_pattern, text) do
       [_, group] -> group
@@ -435,6 +464,9 @@ defmodule Mydia.Library.FileParser do
     |> remove_vmaf()
     |> remove_bracket_contents()
     |> remove_extra_noise()
+    |> remove_streaming_services()
+    |> remove_language_identifiers()
+    |> remove_hdr_profiles()
   end
 
   defp remove_quality_markers(text, _quality) do
@@ -480,6 +512,18 @@ defmodule Mydia.Library.FileParser do
 
   defp remove_extra_noise(text) do
     String.replace(text, @extra_noise_pattern, " ")
+  end
+
+  defp remove_streaming_services(text) do
+    String.replace(text, @streaming_service_pattern, " ")
+  end
+
+  defp remove_language_identifiers(text) do
+    String.replace(text, @language_pattern, " ")
+  end
+
+  defp remove_hdr_profiles(text) do
+    String.replace(text, @hdr_profile_pattern, " ")
   end
 
   defp remove_year_from_title(text, nil), do: text
