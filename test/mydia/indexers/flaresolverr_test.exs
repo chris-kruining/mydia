@@ -1,0 +1,276 @@
+defmodule Mydia.Indexers.FlareSolverrTest do
+  use ExUnit.Case, async: true
+
+  alias Mydia.Indexers.FlareSolverr
+  alias Mydia.Indexers.FlareSolverr.Response
+
+  describe "Response.from_json/1" do
+    test "parses successful response" do
+      json = %{
+        "status" => "ok",
+        "message" => "Challenge solved!",
+        "solution" => %{
+          "url" => "https://example.com/page",
+          "status" => 200,
+          "headers" => %{"content-type" => "text/html"},
+          "response" => "<html>test</html>",
+          "cookies" => [
+            %{
+              "name" => "cf_clearance",
+              "value" => "abc123",
+              "domain" => ".example.com",
+              "path" => "/",
+              "expires" => 1_700_000_000.0,
+              "httpOnly" => true,
+              "secure" => true,
+              "sameSite" => "None"
+            }
+          ],
+          "userAgent" => "Mozilla/5.0 Test"
+        },
+        "startTimestamp" => 1_699_000_000_000,
+        "endTimestamp" => 1_699_000_015_000,
+        "version" => "3.3.21"
+      }
+
+      assert {:ok, response} = Response.from_json(json)
+      assert response.status == "ok"
+      assert response.message == "Challenge solved!"
+      assert response.solution.url == "https://example.com/page"
+      assert response.solution.status == 200
+      assert response.solution.response == "<html>test</html>"
+      assert response.solution.user_agent == "Mozilla/5.0 Test"
+      assert response.start_timestamp == 1_699_000_000_000
+      assert response.end_timestamp == 1_699_000_015_000
+      assert response.version == "3.3.21"
+    end
+
+    test "parses cookies correctly" do
+      json = %{
+        "status" => "ok",
+        "solution" => %{
+          "url" => "https://example.com",
+          "status" => 200,
+          "response" => "",
+          "cookies" => [
+            %{
+              "name" => "cf_clearance",
+              "value" => "abc123",
+              "domain" => ".example.com",
+              "path" => "/",
+              "httpOnly" => true,
+              "secure" => true
+            },
+            %{
+              "name" => "session_id",
+              "value" => "xyz789",
+              "domain" => "example.com",
+              "path" => "/app"
+            }
+          ],
+          "userAgent" => "Mozilla/5.0"
+        }
+      }
+
+      assert {:ok, response} = Response.from_json(json)
+      cookies = Response.cookies(response)
+
+      assert length(cookies) == 2
+
+      [cookie1, cookie2] = cookies
+      assert cookie1.name == "cf_clearance"
+      assert cookie1.value == "abc123"
+      assert cookie1.domain == ".example.com"
+      assert cookie1.http_only == true
+      assert cookie1.secure == true
+
+      assert cookie2.name == "session_id"
+      assert cookie2.value == "xyz789"
+      assert cookie2.http_only == false
+      assert cookie2.secure == false
+    end
+
+    test "returns error for invalid response" do
+      assert {:error, _} = Response.from_json(%{})
+      assert {:error, _} = Response.from_json(%{"invalid" => "data"})
+    end
+  end
+
+  describe "Response helper functions" do
+    setup do
+      json = %{
+        "status" => "ok",
+        "solution" => %{
+          "url" => "https://example.com",
+          "status" => 200,
+          "response" => "<html>body</html>",
+          "cookies" => [
+            %{"name" => "a", "value" => "1", "domain" => "ex.com"},
+            %{"name" => "b", "value" => "2", "domain" => "ex.com"}
+          ],
+          "userAgent" => "TestAgent/1.0"
+        },
+        "startTimestamp" => 1000,
+        "endTimestamp" => 2500
+      }
+
+      {:ok, response} = Response.from_json(json)
+      %{response: response}
+    end
+
+    test "body/1 returns HTML body", %{response: response} do
+      assert Response.body(response) == "<html>body</html>"
+    end
+
+    test "cookies/1 returns cookie list", %{response: response} do
+      cookies = Response.cookies(response)
+      assert length(cookies) == 2
+    end
+
+    test "cookie_header/1 formats cookies as header string", %{response: response} do
+      header = Response.cookie_header(response)
+      assert header == "a=1; b=2"
+    end
+
+    test "user_agent/1 returns user agent", %{response: response} do
+      assert Response.user_agent(response) == "TestAgent/1.0"
+    end
+
+    test "http_status/1 returns status code", %{response: response} do
+      assert Response.http_status(response) == 200
+    end
+
+    test "success?/1 returns true for ok status", %{response: response} do
+      assert Response.success?(response) == true
+    end
+
+    test "success?/1 returns false for error status" do
+      {:ok, error_response} = Response.from_json(%{"status" => "error", "message" => "Failed"})
+      assert Response.success?(error_response) == false
+    end
+
+    test "duration_ms/1 calculates duration", %{response: response} do
+      assert Response.duration_ms(response) == 1500
+    end
+  end
+
+  describe "enabled?/0" do
+    test "returns false when not configured" do
+      # Clear any existing config
+      original = Application.get_env(:mydia, :flaresolverr)
+      Application.delete_env(:mydia, :flaresolverr)
+
+      refute FlareSolverr.enabled?()
+
+      # Restore original config
+      if original, do: Application.put_env(:mydia, :flaresolverr, original)
+    end
+
+    test "returns false when disabled" do
+      original = Application.get_env(:mydia, :flaresolverr)
+
+      Application.put_env(:mydia, :flaresolverr,
+        enabled: false,
+        url: "http://localhost:8191"
+      )
+
+      refute FlareSolverr.enabled?()
+
+      if original do
+        Application.put_env(:mydia, :flaresolverr, original)
+      else
+        Application.delete_env(:mydia, :flaresolverr)
+      end
+    end
+
+    test "returns true when enabled with URL" do
+      original = Application.get_env(:mydia, :flaresolverr)
+
+      Application.put_env(:mydia, :flaresolverr,
+        enabled: true,
+        url: "http://localhost:8191"
+      )
+
+      assert FlareSolverr.enabled?()
+
+      if original do
+        Application.put_env(:mydia, :flaresolverr, original)
+      else
+        Application.delete_env(:mydia, :flaresolverr)
+      end
+    end
+  end
+
+  describe "config/0" do
+    test "returns nil when not configured" do
+      original = Application.get_env(:mydia, :flaresolverr)
+      Application.delete_env(:mydia, :flaresolverr)
+
+      assert FlareSolverr.config() == nil
+
+      if original, do: Application.put_env(:mydia, :flaresolverr, original)
+    end
+
+    test "returns config map when configured" do
+      original = Application.get_env(:mydia, :flaresolverr)
+
+      Application.put_env(:mydia, :flaresolverr,
+        enabled: true,
+        url: "http://localhost:8191",
+        timeout: 60_000,
+        max_timeout: 120_000
+      )
+
+      config = FlareSolverr.config()
+      assert config.enabled == true
+      assert config.url == "http://localhost:8191"
+      assert config.timeout == 60_000
+      assert config.max_timeout == 120_000
+
+      if original do
+        Application.put_env(:mydia, :flaresolverr, original)
+      else
+        Application.delete_env(:mydia, :flaresolverr)
+      end
+    end
+  end
+
+  describe "get/2" do
+    test "returns error when not configured" do
+      original = Application.get_env(:mydia, :flaresolverr)
+      Application.delete_env(:mydia, :flaresolverr)
+
+      assert {:error, :not_configured} = FlareSolverr.get("https://example.com")
+
+      if original, do: Application.put_env(:mydia, :flaresolverr, original)
+    end
+
+    test "returns error when disabled" do
+      original = Application.get_env(:mydia, :flaresolverr)
+
+      Application.put_env(:mydia, :flaresolverr,
+        enabled: false,
+        url: "http://localhost:8191"
+      )
+
+      assert {:error, :disabled} = FlareSolverr.get("https://example.com")
+
+      if original do
+        Application.put_env(:mydia, :flaresolverr, original)
+      else
+        Application.delete_env(:mydia, :flaresolverr)
+      end
+    end
+  end
+
+  describe "post/2" do
+    test "returns error when not configured" do
+      original = Application.get_env(:mydia, :flaresolverr)
+      Application.delete_env(:mydia, :flaresolverr)
+
+      assert {:error, :not_configured} = FlareSolverr.post("https://example.com")
+
+      if original, do: Application.put_env(:mydia, :flaresolverr, original)
+    end
+  end
+end
