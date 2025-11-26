@@ -46,6 +46,7 @@ npm-debug.log
 # Database files
 *.db
 *.db-*
+/priv/repo/structure.sql
 
 # Docker Compose override files (personal dev environment customization)
 compose.override.yml
