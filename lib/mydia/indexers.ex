@@ -28,6 +28,7 @@ defmodule Mydia.Indexers do
   alias Mydia.Indexers.RateLimiter
   alias Mydia.Indexers.ReleaseRanker
   alias Mydia.Indexers.CardigannDefinition
+  alias Mydia.Indexers.CardigannAuth
   alias Mydia.Settings
   alias Mydia.Repo
   import Ecto.Query
@@ -419,6 +420,62 @@ defmodule Mydia.Indexers do
   """
   def get_cardigann_definition_by_indexer_id(indexer_id) do
     Repo.get_by(CardigannDefinition, indexer_id: indexer_id)
+  end
+
+  @doc """
+  Gets a single Cardigann definition by name.
+
+  Returns nil if the definition does not exist.
+  """
+  def get_cardigann_definition_by_name(name) do
+    Repo.get_by(CardigannDefinition, name: name)
+  end
+
+  @doc """
+  Gets authentication cookies for a Cardigann indexer by name.
+
+  Returns a list of cookie strings if the indexer has an active session,
+  or an empty list if no session exists or authentication is not required.
+  """
+  def get_cardigann_auth_cookies(indexer_name) do
+    case get_cardigann_definition_by_name(indexer_name) do
+      nil ->
+        []
+
+      definition ->
+        case CardigannAuth.get_stored_session(definition.id) do
+          {:ok, session} -> session.cookies || []
+          {:error, _} -> []
+        end
+    end
+  end
+
+  @doc """
+  Gets download configuration for a Cardigann indexer by name.
+
+  Returns a map with:
+  - `:cookies` - List of authentication cookies
+  - `:flaresolverr_enabled` - Whether FlareSolverr is required for this indexer
+
+  Returns nil if indexer not found.
+  """
+  def get_cardigann_download_config(indexer_name) do
+    case get_cardigann_definition_by_name(indexer_name) do
+      nil ->
+        nil
+
+      definition ->
+        cookies =
+          case CardigannAuth.get_stored_session(definition.id) do
+            {:ok, session} -> session.cookies || []
+            {:error, _} -> []
+          end
+
+        %{
+          cookies: cookies,
+          flaresolverr_enabled: definition.flaresolverr_enabled || false
+        }
+    end
   end
 
   @doc """
