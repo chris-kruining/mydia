@@ -414,7 +414,7 @@ defmodule Mydia.Downloads.Client.Rtorrent do
   defp extract_torrent_hash({:file, file_contents}) do
     # Extract info hash from torrent file
     case extract_info_hash_from_torrent(file_contents) do
-      {:ok, hash} -> {:ok, String.upcase(hash)}
+      {:ok, hash} -> {:ok, hash}
       {:error, reason} -> {:error, Error.invalid_torrent(reason)}
     end
   end
@@ -643,7 +643,7 @@ defmodule Mydia.Downloads.Client.Rtorrent do
     case find_info_dict_boundaries(torrent_data) do
       {:ok, start_pos, end_pos} ->
         info_bytes = binary_part(torrent_data, start_pos, end_pos - start_pos)
-        hash = :crypto.hash(:sha, info_bytes) |> Base.encode16(case: :lower)
+        hash = :crypto.hash(:sha, info_bytes) |> Base.encode16(case: :upper)
         {:ok, hash}
 
       {:error, reason} ->
