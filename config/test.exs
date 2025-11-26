@@ -45,12 +45,13 @@ case database_type do
       busy_timeout: 30_000
 end
 
-# We don't run a server during test. If one is required,
-# you can enable the server option below.
+# We run a server during test for Wallaby browser-based feature tests.
+# The server is enabled by default. Individual tests that don't need it
+# won't be affected since they use Phoenix.ConnTest directly.
 config :mydia, MydiaWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "CuiGpJ9j+jd1Xb0aq51rBSKLxBYwqr3tvwvMyS2aXBUAlHRtSCT3/GX8fxFcV6UE",
-  server: false
+  server: true
 
 # Print only warnings and errors during test
 config :logger, level: :warning
@@ -76,3 +77,20 @@ config :mydia, Oban,
 # Disable health monitoring processes in test mode
 config :mydia,
   start_health_monitors: false
+
+# Wallaby configuration for browser-based feature tests
+# Uses Chrome/Chromium in headless mode
+# Chromedriver path is auto-detected, or can be set via CHROMEDRIVER_PATH
+wallaby_headless = System.get_env("WALLABY_HEADLESS", "true") == "true"
+
+wallaby_chromedriver_opts =
+  case System.get_env("CHROMEDRIVER_PATH") do
+    nil -> [headless: wallaby_headless]
+    path -> [path: path, headless: wallaby_headless]
+  end
+
+config :wallaby,
+  driver: Wallaby.Chrome,
+  screenshot_on_failure: true,
+  screenshot_dir: "tmp/wallaby_screenshots",
+  chromedriver: wallaby_chromedriver_opts
