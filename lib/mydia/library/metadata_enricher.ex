@@ -221,14 +221,13 @@ defmodule Mydia.Library.MetadataEnricher do
 
   defp extract_year_from_date(_), do: nil
 
-  defp maybe_add_quality_profile(attrs, %{parsed_info: %{quality: quality}})
-       when map_size(quality) > 0 do
-    # For now, use default quality profile
-    # In the future, we could match quality to profiles
-    attrs
+  defp maybe_add_quality_profile(attrs, _match_result) do
+    # Use the configured default quality profile if set
+    case Settings.get_default_quality_profile_id() do
+      nil -> attrs
+      profile_id -> Map.put(attrs, :quality_profile_id, profile_id)
+    end
   end
-
-  defp maybe_add_quality_profile(attrs, _match_result), do: attrs
 
   defp associate_media_file(media_item, media_file_id) do
     # Update the media file to associate it with this media item

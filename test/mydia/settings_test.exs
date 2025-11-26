@@ -106,22 +106,22 @@ defmodule Mydia.SettingsTest do
 
       # Check SD profile has max size (converted to quality_standards)
       sd_profile = Settings.get_quality_profile_by_name("SD")
-      assert sd_profile.quality_standards["movie_max_size_mb"] == 2048
-      assert sd_profile.quality_standards["episode_max_size_mb"] == 1024
+      assert sd_profile.quality_standards[:movie_max_size_mb] == 2048
+      assert sd_profile.quality_standards[:episode_max_size_mb] == 1024
 
       # Check HD-720p profile has size range
       hd720_profile = Settings.get_quality_profile_by_name("HD-720p")
-      assert hd720_profile.quality_standards["movie_min_size_mb"] == 1024
-      assert hd720_profile.quality_standards["movie_max_size_mb"] == 5120
-      assert hd720_profile.quality_standards["episode_min_size_mb"] == 512
-      assert hd720_profile.quality_standards["episode_max_size_mb"] == 2560
+      assert hd720_profile.quality_standards[:movie_min_size_mb] == 1024
+      assert hd720_profile.quality_standards[:movie_max_size_mb] == 5120
+      assert hd720_profile.quality_standards[:episode_min_size_mb] == 512
+      assert hd720_profile.quality_standards[:episode_max_size_mb] == 2560
 
       # Check 4K/UHD profile has size constraints
       uhd_profile = Settings.get_quality_profile_by_name("4K/UHD")
-      assert uhd_profile.quality_standards["movie_min_size_mb"] == 15360
-      assert uhd_profile.quality_standards["movie_max_size_mb"] == 81920
-      assert uhd_profile.quality_standards["episode_min_size_mb"] == 7680
-      assert uhd_profile.quality_standards["episode_max_size_mb"] == 40960
+      assert uhd_profile.quality_standards[:movie_min_size_mb] == 15360
+      assert uhd_profile.quality_standards[:movie_max_size_mb] == 81920
+      assert uhd_profile.quality_standards[:episode_min_size_mb] == 7680
+      assert uhd_profile.quality_standards[:episode_max_size_mb] == 40960
     end
 
     test "Any profile allows upgrades, others do not" do
@@ -1609,8 +1609,8 @@ defmodule Mydia.SettingsTest do
       valid_prefs = %{
         provider_priority: ["metadata_relay", "tvdb", "tmdb"],
         field_providers: %{
-          "title" => "tvdb",
-          "overview" => "tmdb"
+          title: "tvdb",
+          overview: "tmdb"
         },
         language: "en-US",
         region: "US",
@@ -2333,6 +2333,100 @@ defmodule Mydia.SettingsTest do
       # Verify core settings match
       assert imported.qualities == original.qualities
       assert imported.quality_standards == original.quality_standards
+    end
+  end
+
+  describe "default quality profile" do
+    setup do
+      # Ensure we have some quality profiles to work with
+      Repo.delete_all(QualityProfile)
+      {:ok, _} = Settings.ensure_default_quality_profiles()
+      profiles = Settings.list_quality_profiles()
+      %{profiles: profiles}
+    end
+
+    test "get_default_quality_profile_id/0 returns nil when not set" do
+      # Clear any existing default
+      case Settings.get_config_setting_by_key("media.default_quality_profile_id") do
+        nil -> :ok
+        setting -> Settings.delete_config_setting(setting)
+      end
+
+      assert Settings.get_default_quality_profile_id() == nil
+    end
+
+    test "set_default_quality_profile/1 persists the profile ID", %{profiles: profiles} do
+      profile = hd(profiles)
+
+      assert {:ok, _} = Settings.set_default_quality_profile(profile.id)
+      assert Settings.get_default_quality_profile_id() == profile.id
+    end
+
+    test "set_default_quality_profile/1 with nil clears the default", %{profiles: profiles} do
+      profile = hd(profiles)
+
+      # First set a default
+      {:ok, _} = Settings.set_default_quality_profile(profile.id)
+      assert Settings.get_default_quality_profile_id() == profile.id
+
+      # Then clear it
+      {:ok, _} = Settings.set_default_quality_profile(nil)
+      assert Settings.get_default_quality_profile_id() == nil
+    end
+
+    test "get_default_quality_profile/0 returns nil when not set" do
+      # Clear any existing default
+      case Settings.get_config_setting_by_key("media.default_quality_profile_id") do
+        nil -> :ok
+        setting -> Settings.delete_config_setting(setting)
+      end
+
+      assert Settings.get_default_quality_profile() == nil
+    end
+
+    test "get_default_quality_profile/0 returns the full struct when set", %{profiles: profiles} do
+      profile = hd(profiles)
+
+      {:ok, _} = Settings.set_default_quality_profile(profile.id)
+      result = Settings.get_default_quality_profile()
+
+      assert result.id == profile.id
+      assert result.name == profile.name
+    end
+
+    test "get_default_quality_profile/0 returns nil if profile was deleted", %{profiles: profiles} do
+      profile = hd(profiles)
+
+      # Set default
+      {:ok, _} = Settings.set_default_quality_profile(profile.id)
+      assert Settings.get_default_quality_profile_id() == profile.id
+
+      # Delete the profile
+      {:ok, _} = Settings.delete_quality_profile(profile)
+
+      # Should return nil since profile no longer exists
+      assert Settings.get_default_quality_profile() == nil
+      # But the ID is still stored
+      assert Settings.get_default_quality_profile_id() == profile.id
+    end
+
+    test "set_default_quality_profile/1 updates existing setting", %{profiles: profiles} do
+      [profile1, profile2 | _] = profiles
+
+      # Set first default
+      {:ok, _} = Settings.set_default_quality_profile(profile1.id)
+      assert Settings.get_default_quality_profile_id() == profile1.id
+
+      # Update to second profile
+      {:ok, _} = Settings.set_default_quality_profile(profile2.id)
+      assert Settings.get_default_quality_profile_id() == profile2.id
+
+      # Verify only one config setting exists
+      settings =
+        Settings.list_config_settings()
+        |> Enum.filter(&(&1.key == "media.default_quality_profile_id"))
+
+      assert length(settings) == 1
     end
   end
 end

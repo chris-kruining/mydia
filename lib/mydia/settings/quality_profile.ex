@@ -5,7 +5,7 @@ defmodule Mydia.Settings.QualityProfile do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias Mydia.Settings.JsonMapType
+  alias Mydia.Settings.JsonAtomMapType
   alias Mydia.Settings.StringListType
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -63,9 +63,9 @@ defmodule Mydia.Settings.QualityProfile do
     field :version, :integer, default: 1
     field :source_url, :string
     field :last_synced_at, :utc_datetime
-    field :quality_standards, JsonMapType
-    field :metadata_preferences, JsonMapType
-    field :customizations, JsonMapType
+    field :quality_standards, JsonAtomMapType
+    field :metadata_preferences, JsonAtomMapType
+    field :customizations, JsonAtomMapType
 
     has_many :media_files, Mydia.Library.MediaFile
 
