@@ -314,8 +314,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
               manually_edited: true,
               parsed_info:
                 Map.merge(matched_file.match_result.parsed_info, %{
-                  season: validated_data.season,
-                  episodes: validated_data.episodes,
+                  season: Map.get(validated_data, :season),
+                  episodes: Map.get(validated_data, :episodes, []),
                   type: validated_data.type
                 })
             })
@@ -329,8 +329,8 @@ defmodule MydiaWeb.ImportMediaLive.Index do
               manually_edited: true,
               metadata: %{},
               parsed_info: %{
-                season: validated_data.season,
-                episodes: validated_data.episodes,
+                season: Map.get(validated_data, :season),
+                episodes: Map.get(validated_data, :episodes, []),
                 type: validated_data.type
               }
             }
