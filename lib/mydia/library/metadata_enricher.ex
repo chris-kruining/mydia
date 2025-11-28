@@ -30,7 +30,10 @@ defmodule Mydia.Library.MetadataEnricher do
       iex> MetadataEnricher.enrich(match_result)
       {:ok, %MediaItem{title: "The Matrix", ...}}
   """
-  def enrich(%{provider_id: provider_id, provider_type: provider_type} = match_result, opts \\ []) do
+  def enrich(match_result, opts \\ [])
+
+  def enrich(%{provider_id: provider_id, provider_type: provider_type} = match_result, opts)
+      when not is_nil(provider_id) and not is_nil(provider_type) do
     config = Keyword.get(opts, :config, Metadata.default_relay_config())
     media_file_id = Keyword.get(opts, :media_file_id)
 
@@ -100,6 +103,19 @@ defmodule Mydia.Library.MetadataEnricher do
 
         error
     end
+  end
+
+  # Fallback clause for invalid match results (missing provider_id or provider_type)
+  def enrich(match_result, _opts) do
+    Logger.error("Invalid match result - missing provider_id or provider_type",
+      has_provider_id: is_map(match_result) and Map.has_key?(match_result, :provider_id),
+      has_provider_type: is_map(match_result) and Map.has_key?(match_result, :provider_type),
+      keys: if(is_map(match_result), do: Map.keys(match_result), else: :not_a_map),
+      title: if(is_map(match_result), do: Map.get(match_result, :title), else: nil)
+    )
+
+    {:error,
+     {:invalid_match_result, "Match result missing required fields: provider_id or provider_type"}}
   end
 
   ## Private Functions
@@ -487,6 +503,22 @@ defmodule Mydia.Library.MetadataEnricher do
       # Library is :mixed, allow both types
       library_path.type == :mixed ->
         :ok
+
+      # Specialized library types (music, books, adult) should not have movie/TV metadata enrichment
+      library_path.type in [:music, :books, :adult] ->
+        emit_type_mismatch_telemetry(media_type_string, library_path)
+
+        Logger.warning(
+          "Type mismatch: Cannot enrich #{media_type_string} metadata in specialized library",
+          media_type: media_type_string,
+          library_path: library_path.path,
+          library_type: library_path.type,
+          file_path: absolute_path
+        )
+
+        {:error,
+         {:library_type_mismatch,
+          "Cannot add #{media_type_string} to a library path configured for #{library_path.type} (path: #{library_path.path})"}}
 
       # Movie in :series library
       media_type_string == "movie" and library_path.type == :series ->

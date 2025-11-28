@@ -39,7 +39,8 @@ defmodule Mydia.Jobs.MediaImport do
       attempt: attempt
     )
 
-    download = Downloads.get_download!(download_id, preload: [:media_item, :episode])
+    download =
+      Downloads.get_download!(download_id, preload: [:media_item, :episode, :library_path])
 
     if is_nil(download.completed_at) do
       Logger.warning("Download not completed, skipping import",
@@ -251,60 +252,70 @@ defmodule Mydia.Jobs.MediaImport do
   end
 
   defp determine_library_path(download) do
-    # Get library paths from settings
-    library_paths = Settings.list_library_paths()
+    # If download has a direct library_path association (specialized libraries),
+    # use that directly
+    if download.library_path do
+      download.library_path
+    else
+      # Get library paths from settings
+      library_paths = Settings.list_library_paths()
 
-    {media_type, required_types} =
-      cond do
-        # TV episode
-        download.episode && download.media_item ->
-          {"TV show", [:series, :mixed]}
+      {media_type, required_types} =
+        cond do
+          # TV episode
+          download.episode && download.media_item ->
+            {"TV show", [:series, :mixed]}
 
-        # Movie
-        download.media_item && download.media_item.type == "movie" ->
-          {"movie", [:movies, :mixed]}
+          # Movie
+          download.media_item && download.media_item.type == "movie" ->
+            {"movie", [:movies, :mixed]}
 
-        # TV show (no specific episode)
-        download.media_item && download.media_item.type == "tv_show" ->
-          {"TV show", [:series, :mixed]}
+          # TV show (no specific episode)
+          download.media_item && download.media_item.type == "tv_show" ->
+            {"TV show", [:series, :mixed]}
 
-        true ->
-          {"unknown", [:mixed]}
+          true ->
+            {"unknown", [:mixed]}
+        end
+
+      # Find compatible library path
+      library_path =
+        Enum.find(library_paths, fn lp ->
+          lp.type in required_types && lp.monitored
+        end)
+
+      # Log warning if no compatible library found
+      if is_nil(library_path) do
+        Logger.warning("No compatible library path found for import",
+          download_id: download.id,
+          media_type: media_type,
+          required_library_types: required_types,
+          available_libraries:
+            Enum.map(library_paths, fn lp ->
+              %{path: lp.path, type: lp.type, monitored: lp.monitored}
+            end)
+        )
       end
 
-    # Find compatible library path
-    library_path =
-      Enum.find(library_paths, fn lp ->
-        lp.type in required_types && lp.monitored
-      end)
-
-    # Log warning if no compatible library found
-    if is_nil(library_path) do
-      Logger.warning("No compatible library path found for import",
-        download_id: download.id,
-        media_type: media_type,
-        required_library_types: required_types,
-        available_libraries:
-          Enum.map(library_paths, fn lp ->
-            %{path: lp.path, type: lp.type, monitored: lp.monitored}
-          end)
-      )
+      library_path
     end
-
-    library_path
   end
 
   defp organize_and_import_files(download, files, library_path, args) do
-    # Filter video files only
-    video_files = filter_video_files(files)
+    # Determine which files to import based on library type
+    files_to_import = filter_files_for_library_type(files, library_path.type)
 
-    if video_files == [] do
-      Logger.warning("No video files found in download", download_id: download.id)
-      {:error, :no_video_files}
+    if files_to_import == [] do
+      Logger.warning("No importable files found in download",
+        download_id: download.id,
+        library_type: library_path.type
+      )
+
+      {:error, :no_importable_files}
     else
       # Import each file - destination path is determined per-file for TV shows
       results =
-        Enum.map(video_files, fn file ->
+        Enum.map(files_to_import, fn file ->
           import_file(file, download, library_path, args)
         end)
 
@@ -366,6 +377,49 @@ defmodule Mydia.Jobs.MediaImport do
       ext = Path.extname(file.name) |> String.downcase()
       ext in video_extensions
     end)
+  end
+
+  # Filter files based on library type
+  defp filter_files_for_library_type(files, library_type)
+       when library_type in [:movies, :series, :mixed] do
+    # For video libraries, only import video files
+    filter_video_files(files)
+  end
+
+  defp filter_files_for_library_type(files, :music) do
+    # Music file extensions
+    music_extensions = ~w(.mp3 .flac .wav .aac .ogg .m4a .wma .opus .ape .alac .aiff)
+
+    Enum.filter(files, fn file ->
+      ext = Path.extname(file.name) |> String.downcase()
+      ext in music_extensions
+    end)
+  end
+
+  defp filter_files_for_library_type(files, :books) do
+    # Ebook file extensions
+    book_extensions = ~w(.epub .pdf .mobi .azw .azw3 .cbr .cbz .djvu .fb2 .lit .txt .rtf)
+
+    Enum.filter(files, fn file ->
+      ext = Path.extname(file.name) |> String.downcase()
+      ext in book_extensions
+    end)
+  end
+
+  defp filter_files_for_library_type(files, :adult) do
+    # Adult libraries can contain video and image files
+    media_extensions =
+      ~w(.mkv .mp4 .avi .mov .wmv .flv .webm .m4v .jpg .jpeg .png .gif .webp .bmp .tiff)
+
+    Enum.filter(files, fn file ->
+      ext = Path.extname(file.name) |> String.downcase()
+      ext in media_extensions
+    end)
+  end
+
+  defp filter_files_for_library_type(files, _unknown) do
+    # For unknown library types, import all files (fallback)
+    files
   end
 
   defp import_file(file, download, library_path, args) do
@@ -798,6 +852,7 @@ defmodule Mydia.Jobs.MediaImport do
     }
 
     # Use the episode parameter if provided, otherwise fall back to download associations
+    # For specialized libraries (music, books, adult), there may be no media_item/episode
     attrs =
       cond do
         episode && episode.id ->
@@ -816,6 +871,18 @@ defmodule Mydia.Jobs.MediaImport do
           Map.merge(attrs, %{
             media_item_id: download.media_item_id,
             episode_id: nil
+          })
+
+        # Specialized library download (music, books, adult) - no media_item needed
+        download.library_path_id && library_path.type in [:music, :books, :adult] ->
+          Logger.debug("Creating media file for specialized library",
+            library_type: library_path.type,
+            download_id: download.id
+          )
+
+          Map.merge(attrs, %{
+            episode_id: nil,
+            media_item_id: nil
           })
 
         true ->

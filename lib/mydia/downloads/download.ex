@@ -27,6 +27,10 @@ defmodule Mydia.Downloads.Download do
     belongs_to :media_item, Mydia.Media.MediaItem
     belongs_to :episode, Mydia.Media.Episode
 
+    # For specialized library downloads (music, books, adult) that don't have
+    # a media_item, this field indicates which library to import files to
+    belongs_to :library_path, Mydia.Settings.LibraryPath
+
     timestamps(type: :utc_datetime, updated_at: :updated_at)
   end
 
@@ -38,6 +42,7 @@ defmodule Mydia.Downloads.Download do
     |> cast(attrs, [
       :media_item_id,
       :episode_id,
+      :library_path_id,
       :indexer,
       :title,
       :download_url,
@@ -54,6 +59,7 @@ defmodule Mydia.Downloads.Download do
     |> validate_required([:title])
     |> foreign_key_constraint(:media_item_id)
     |> foreign_key_constraint(:episode_id)
+    |> foreign_key_constraint(:library_path_id)
     |> unique_constraint([:download_client, :download_client_id],
       message: "download already exists for this torrent"
     )
