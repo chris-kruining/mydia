@@ -222,7 +222,11 @@ defmodule Mydia.Indexers.CardigannParser do
       attribute: Map.get(selector, "attribute"),
       remove: Map.get(selector, "remove"),
       case: Map.get(selector, "case"),
-      filters: Map.get(selector, "filters", [])
+      filters: Map.get(selector, "filters", []),
+      # text field - allows computed/templated field values using {{ .Result.fieldname }}
+      text: Map.get(selector, "text"),
+      # optional field - if true, field extraction failure doesn't fail the row
+      optional: Map.get(selector, "optional", false)
     }
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
     |> Map.new()

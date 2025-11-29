@@ -213,6 +213,35 @@ defmodule Mydia.Indexers.CardigannResultParserTest do
     test "returns original value with empty filter list" do
       assert {:ok, "test"} = CardigannResultParser.apply_filters("test", [])
     end
+
+    test "applies split filter" do
+      # Split by "/" and get index 2 (0-based)
+      filters = [%{name: "split", args: ["/", 2]}]
+      assert {:ok, "42"} = CardigannResultParser.apply_filters("/sub/42/", filters)
+
+      # Split by "/" and get index 0
+      filters = [%{name: "split", args: ["/", 0]}]
+      assert {:ok, ""} = CardigannResultParser.apply_filters("/sub/42/", filters)
+
+      # Split by "/" and get index 1
+      filters = [%{name: "split", args: ["/", 1]}]
+      assert {:ok, "sub"} = CardigannResultParser.apply_filters("/sub/42/", filters)
+    end
+
+    test "applies split filter with string keys" do
+      filters = [%{"name" => "split", "args" => ["/", 2]}]
+      assert {:ok, "category"} = CardigannResultParser.apply_filters("/type/category/id", filters)
+    end
+
+    test "applies urldecode filter" do
+      filters = [%{name: "urldecode"}]
+      assert {:ok, "hello world"} = CardigannResultParser.apply_filters("hello%20world", filters)
+    end
+
+    test "applies urldecode filter with string keys" do
+      filters = [%{"name" => "urldecode"}]
+      assert {:ok, "hello+world"} = CardigannResultParser.apply_filters("hello%2Bworld", filters)
+    end
   end
 
   describe "parse_size/1" do
@@ -250,6 +279,55 @@ defmodule Mydia.Indexers.CardigannResultParserTest do
     test "handles malformed size strings" do
       assert CardigannResultParser.parse_size("invalid") == 0
       assert CardigannResultParser.parse_size("N/A") == 0
+    end
+
+    test "parses lowercase units (case-insensitive)" do
+      # Lowercase gb/mb are common on some sites
+      assert CardigannResultParser.parse_size("3.05Gb") == 3_274_912_563
+      assert CardigannResultParser.parse_size("688Mb") == 721_420_288
+      assert CardigannResultParser.parse_size("1.5 gb") == 1_610_612_736
+      assert CardigannResultParser.parse_size("500 mb") == 524_288_000
+    end
+  end
+
+  describe "parse_size_with_title_fallback/2" do
+    test "uses raw size when available" do
+      assert CardigannResultParser.parse_size_with_title_fallback("1.5 GB", "Some Title") ==
+               1_610_612_736
+    end
+
+    test "extracts size from title when raw size is empty" do
+      title = "HD 1080p (3.05Gb) - Some Video"
+      assert CardigannResultParser.parse_size_with_title_fallback("", title) == 3_274_912_563
+      assert CardigannResultParser.parse_size_with_title_fallback("0", title) == 3_274_912_563
+    end
+
+    test "extracts size from title with MB" do
+      title = "Video File 720p 688Mb"
+      assert CardigannResultParser.parse_size_with_title_fallback(nil, title) == 721_420_288
+    end
+
+    test "extracts size from title with various formats" do
+      # Space before unit
+      assert CardigannResultParser.parse_size_with_title_fallback("0", "Video 1.2 GB quality") ==
+               1_288_490_188
+
+      # No space before unit
+      assert CardigannResultParser.parse_size_with_title_fallback("0", "Video 500MB download") ==
+               524_288_000
+
+      # Parentheses
+      assert CardigannResultParser.parse_size_with_title_fallback("0", "Title (2.5Gb)") ==
+               2_684_354_560
+    end
+
+    test "returns 0 when no size found in title" do
+      assert CardigannResultParser.parse_size_with_title_fallback("", "No size here") == 0
+
+      assert CardigannResultParser.parse_size_with_title_fallback(
+               nil,
+               "Just a title with #tags"
+             ) == 0
     end
   end
 
@@ -494,6 +572,148 @@ defmodule Mydia.Indexers.CardigannResultParserTest do
       assert result.quality.resolution == "1080p"
       assert result.quality.source == "BluRay"
       assert result.quality.codec == "x264"
+    end
+  end
+
+  describe "text field type with templates" do
+    test "extracts category using text field referencing extracted values" do
+      definition = %Parsed{
+        id: "test",
+        name: "Test",
+        capabilities: %{
+          modes: %{"search" => ["q"]},
+          categorymappings: [
+            %{"id" => "42", "cat" => "Movies/HD", "desc" => "HD Movies"}
+          ]
+        },
+        search: %{
+          rows: %{selector: "div.item"},
+          fields: %{
+            # First extract category_optional from HTML (like 1337x does)
+            :category_optional => %{
+              selector: "a.category",
+              attribute: "href",
+              optional: true,
+              filters: [%{name: "split", args: ["/", 2]}]
+            },
+            # Then compute category using template referencing the extracted value
+            :category => %{
+              text:
+                "{{ if .Result.category_optional }}{{ .Result.category_optional }}{{ else }}40{{ end }}"
+            },
+            :title => %{selector: "div.title"},
+            :download => %{selector: "a.download", attribute: "href"},
+            :size => %{selector: "div.size"},
+            :seeders => %{selector: "div.seeds"},
+            :leechers => %{selector: "div.peers"}
+          }
+        }
+      }
+
+      html_body = """
+      <div class="item">
+        <div class="title">Test Movie 1080p</div>
+        <a class="category" href="/sub/42/">HD Movies</a>
+        <div class="size">5 GB</div>
+        <div class="seeds">100</div>
+        <div class="peers">50</div>
+        <a class="download" href="magnet:?xt=test">Download</a>
+      </div>
+      """
+
+      response = %{status: 200, body: html_body}
+
+      assert {:ok, [result]} = CardigannResultParser.parse_results(definition, response, "Test")
+      assert result.title == "Test Movie 1080p"
+      # Category should be extracted as 42, which maps to Movies/HD (2040)
+      assert result.category == 2040
+    end
+
+    test "uses default value when optional field not found" do
+      definition = %Parsed{
+        id: "test",
+        name: "Test",
+        capabilities: %{
+          modes: %{"search" => ["q"]},
+          categorymappings: [
+            %{"id" => "40", "cat" => "Other/Misc", "desc" => "Other"}
+          ]
+        },
+        search: %{
+          rows: %{selector: "div.item"},
+          fields: %{
+            :category_optional => %{
+              selector: "a.category",
+              attribute: "href",
+              optional: true,
+              filters: [%{name: "split", args: ["/", 2]}]
+            },
+            :category => %{
+              text:
+                "{{ if .Result.category_optional }}{{ .Result.category_optional }}{{ else }}40{{ end }}"
+            },
+            :title => %{selector: "div.title"},
+            :download => %{selector: "a.download", attribute: "href"},
+            :size => %{selector: "div.size"},
+            :seeders => %{selector: "div.seeds"},
+            :leechers => %{selector: "div.peers"}
+          }
+        }
+      }
+
+      # Note: no category link in HTML
+      html_body = """
+      <div class="item">
+        <div class="title">Test Release</div>
+        <div class="size">1 GB</div>
+        <div class="seeds">50</div>
+        <div class="peers">10</div>
+        <a class="download" href="magnet:?xt=test">Download</a>
+      </div>
+      """
+
+      response = %{status: 200, body: html_body}
+
+      assert {:ok, [result]} = CardigannResultParser.parse_results(definition, response, "Test")
+      # Should fall back to category 40 (Other/Misc = 8010)
+      assert result.category == 8010
+    end
+  end
+
+  describe "optional fields" do
+    test "handles optional field that is not found" do
+      definition = %Parsed{
+        id: "test",
+        name: "Test",
+        search: %{
+          rows: %{selector: "div.item"},
+          fields: %{
+            :title => %{selector: "div.title"},
+            :download => %{selector: "a", attribute: "href"},
+            :details => %{selector: "a.details", attribute: "href", optional: true},
+            :size => %{selector: "div.size"},
+            :seeders => %{selector: "div.seeds"},
+            :leechers => %{selector: "div.peers"}
+          }
+        }
+      }
+
+      html_body = """
+      <div class="item">
+        <div class="title">Test</div>
+        <div class="size">1 GB</div>
+        <div class="seeds">10</div>
+        <div class="peers">5</div>
+        <a href="magnet:?xt=test">Download</a>
+      </div>
+      """
+
+      response = %{status: 200, body: html_body}
+
+      # Should parse successfully even though optional field is missing
+      assert {:ok, [result]} = CardigannResultParser.parse_results(definition, response, "Test")
+      assert result.title == "Test"
+      assert result.info_url == nil
     end
   end
 

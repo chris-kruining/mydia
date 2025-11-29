@@ -47,6 +47,7 @@ defmodule Mydia.Indexers.CardigannResultParser do
   alias Mydia.Indexers.CardigannDefinition.Parsed
   alias Mydia.Indexers.SearchResult
   alias Mydia.Indexers.QualityParser
+  alias Mydia.Indexers.CategoryMapping
   alias Mydia.Indexers.Adapter.Error
   alias Mydia.Indexers.CardigannTemplate
 
@@ -88,6 +89,9 @@ defmodule Mydia.Indexers.CardigannResultParser do
     template_context = Keyword.get(opts, :template_context, %{})
     base_url = Keyword.get(opts, :base_url, "")
 
+    # Extract category mappings from definition capabilities
+    category_mappings = get_in(definition.capabilities, [:categorymappings]) || []
+
     # Guard against nil or non-string bodies
     cond do
       is_nil(body) ->
@@ -95,7 +99,14 @@ defmodule Mydia.Indexers.CardigannResultParser do
 
       is_map(body) ->
         # Req auto-decoded JSON response - parse directly
-        parse_json_results_from_map(definition, body, indexer_name, template_context, base_url)
+        parse_json_results_from_map(
+          definition,
+          body,
+          indexer_name,
+          template_context,
+          base_url,
+          category_mappings
+        )
 
       not is_binary(body) ->
         {:error, Error.search_failed("Invalid response body type: #{inspect(body)}")}
@@ -106,10 +117,24 @@ defmodule Mydia.Indexers.CardigannResultParser do
       true ->
         case detect_response_type(body) do
           :html ->
-            parse_html_results(definition, body, indexer_name, template_context, base_url)
+            parse_html_results(
+              definition,
+              body,
+              indexer_name,
+              template_context,
+              base_url,
+              category_mappings
+            )
 
           :json ->
-            parse_json_results(definition, body, indexer_name, template_context, base_url)
+            parse_json_results(
+              definition,
+              body,
+              indexer_name,
+              template_context,
+              base_url,
+              category_mappings
+            )
         end
     end
   end
@@ -131,20 +156,23 @@ defmodule Mydia.Indexers.CardigannResultParser do
   - `html_body` - HTML response body
   - `indexer_name` - Name of the indexer
   - `template_context` - Template context for rendering filter arguments
+  - `base_url` - Base URL for resolving relative URLs
+  - `category_mappings` - Category mappings from the definition for site-to-Torznab conversion
 
   ## Returns
 
   - `{:ok, results}` - List of SearchResult structs
   - `{:error, reason}` - Parsing error
   """
-  @spec parse_html_results(Parsed.t(), String.t(), String.t(), map(), String.t()) ::
+  @spec parse_html_results(Parsed.t(), String.t(), String.t(), map(), String.t(), list()) ::
           parse_result()
   def parse_html_results(
         %Parsed{} = definition,
         html_body,
         indexer_name,
         template_context \\ %{},
-        base_url \\ ""
+        base_url \\ "",
+        category_mappings \\ []
       ) do
     with {:ok, document} <- parse_html_document(html_body),
          {:ok, rows} <- extract_rows(document, definition.search, template_context) do
@@ -153,7 +181,10 @@ defmodule Mydia.Indexers.CardigannResultParser do
       case parse_row_fields(rows, definition.search, document, template_context) do
         {:ok, parsed_rows} ->
           Logger.info("[#{indexer_name}] Parsed #{length(parsed_rows)} rows successfully")
-          results = transform_to_search_results(parsed_rows, indexer_name, base_url)
+
+          results =
+            transform_to_search_results(parsed_rows, indexer_name, base_url, category_mappings)
+
           Logger.info("[#{indexer_name}] Transformed to #{length(results)} search results")
           {:ok, results}
 
@@ -176,20 +207,23 @@ defmodule Mydia.Indexers.CardigannResultParser do
   - `json_body` - JSON response body
   - `indexer_name` - Name of the indexer
   - `template_context` - Template context for rendering filter arguments
+  - `base_url` - Base URL for resolving relative URLs
+  - `category_mappings` - Category mappings from the definition for site-to-Torznab conversion
 
   ## Returns
 
   - `{:ok, results}` - List of SearchResult structs
   - `{:error, reason}` - Parsing error
   """
-  @spec parse_json_results(Parsed.t(), String.t(), String.t(), map(), String.t()) ::
+  @spec parse_json_results(Parsed.t(), String.t(), String.t(), map(), String.t(), list()) ::
           parse_result()
   def parse_json_results(
         %Parsed{} = definition,
         json_body,
         indexer_name,
         template_context \\ %{},
-        base_url \\ ""
+        base_url \\ "",
+        category_mappings \\ []
       ) do
     with {:ok, json} <- Jason.decode(json_body),
          {:ok, rows} <- extract_json_rows(json, definition.search) do
@@ -198,7 +232,10 @@ defmodule Mydia.Indexers.CardigannResultParser do
       case parse_json_row_fields(rows, definition.search, template_context) do
         {:ok, parsed_rows} ->
           Logger.info("[#{indexer_name}] Parsed #{length(parsed_rows)} JSON rows successfully")
-          results = transform_to_search_results(parsed_rows, indexer_name, base_url)
+
+          results =
+            transform_to_search_results(parsed_rows, indexer_name, base_url, category_mappings)
+
           Logger.info("[#{indexer_name}] Transformed to #{length(results)} search results")
           {:ok, results}
 
@@ -227,25 +264,30 @@ defmodule Mydia.Indexers.CardigannResultParser do
   - `json` - Already decoded JSON map
   - `indexer_name` - Name of the indexer
   - `template_context` - Template context for rendering filter arguments
+  - `base_url` - Base URL for resolving relative URLs
+  - `category_mappings` - Category mappings from the definition for site-to-Torznab conversion
 
   ## Returns
 
   - `{:ok, results}` - List of SearchResult structs
   - `{:error, reason}` - Parsing error
   """
-  @spec parse_json_results_from_map(Parsed.t(), map(), String.t(), map(), String.t()) ::
+  @spec parse_json_results_from_map(Parsed.t(), map(), String.t(), map(), String.t(), list()) ::
           parse_result()
   def parse_json_results_from_map(
         %Parsed{} = definition,
         json,
         indexer_name,
         template_context \\ %{},
-        base_url \\ ""
+        base_url \\ "",
+        category_mappings \\ []
       )
       when is_map(json) do
     with {:ok, rows} <- extract_json_rows(json, definition.search),
          {:ok, parsed_rows} <- parse_json_row_fields(rows, definition.search, template_context) do
-      results = transform_to_search_results(parsed_rows, indexer_name, base_url)
+      results =
+        transform_to_search_results(parsed_rows, indexer_name, base_url, category_mappings)
+
       {:ok, results}
     end
   rescue
@@ -392,18 +434,69 @@ defmodule Mydia.Indexers.CardigannResultParser do
   end
 
   defp parse_single_row(row, fields, template_context) do
-    field_values =
-      Enum.reduce(fields, %{}, fn {field_name, field_config}, acc ->
-        case extract_field_value(row, field_config, template_context) do
-          {:ok, value} ->
-            Map.put(acc, field_name, value)
-
-          {:error, reason} ->
-            # Field extraction failed, skip this field
-            Logger.debug("Field #{field_name} extraction failed: #{inspect(reason)}")
-            acc
+    # Separate fields into selector-based and text-based (computed) fields
+    # A field is text-based if it has a non-empty :text or "text" key
+    {selector_fields, text_fields} =
+      Enum.split_with(fields, fn {_name, config} ->
+        # Ensure config is a map before accessing it
+        if is_map(config) do
+          text_value = Map.get(config, :text) || Map.get(config, "text")
+          is_nil(text_value) || text_value == ""
+        else
+          # Non-map configs are treated as selector-based
+          true
         end
       end)
+
+    # First pass: Extract all selector-based fields from HTML/JSON
+    field_values =
+      Enum.reduce(selector_fields, %{}, fn {field_name, field_config}, acc ->
+        # Skip non-map configs
+        if not is_map(field_config) do
+          Logger.debug("Skipping field #{field_name}: config is not a map")
+          acc
+        else
+          is_optional =
+            Map.get(field_config, :optional) || Map.get(field_config, "optional", false)
+
+          case extract_field_value(row, field_config, template_context) do
+            {:ok, value} ->
+              Map.put(acc, field_name, value)
+
+            {:error, reason} ->
+              # Field extraction failed
+              if is_optional do
+                # Optional field - just skip it, don't log as error
+                acc
+              else
+                Logger.debug("Field #{field_name} extraction failed: #{inspect(reason)}")
+                acc
+              end
+          end
+        end
+      end)
+
+    # Second pass: Compute text-based fields using templates
+    # These can reference previously extracted values via {{ .Result.fieldname }}
+    field_values =
+      Enum.reduce(text_fields, field_values, fn {field_name, field_config}, acc ->
+        # Skip non-map configs
+        if not is_map(field_config) do
+          Logger.debug("Skipping text field #{field_name}: config is not a map")
+          acc
+        else
+          case compute_text_field(field_config, acc, template_context) do
+            {:ok, value} ->
+              Map.put(acc, field_name, value)
+
+            {:error, _reason} ->
+              acc
+          end
+        end
+      end)
+
+    # Handle compound title fields (title_default, title_optional -> title)
+    field_values = combine_compound_fields(field_values)
 
     # Only return row if we got at least title and download
     has_title = Map.has_key?(field_values, "title") || Map.has_key?(field_values, :title)
@@ -420,6 +513,125 @@ defmodule Mydia.Indexers.CardigannResultParser do
     end
   end
 
+  # Computes a text-based field value using template rendering
+  # The template can reference previously extracted values via {{ .Result.fieldname }}
+  defp compute_text_field(field_config, extracted_values, template_context)
+       when is_map(field_config) do
+    text_template = Map.get(field_config, :text) || Map.get(field_config, "text")
+    filters = Map.get(field_config, :filters) || Map.get(field_config, "filters", [])
+
+    # Guard against nil or non-string text templates
+    if is_nil(text_template) or not is_binary(text_template) do
+      {:error, :invalid_text_template}
+    else
+      # Build a context that includes the extracted result values
+      # Cardigann templates use .Result.fieldname to access extracted values
+      result_context =
+        extracted_values
+        |> Enum.map(fn {key, value} ->
+          # Ensure keys are strings for template lookup
+          key_str = if is_atom(key), do: Atom.to_string(key), else: key
+          {key_str, value}
+        end)
+        |> Map.new()
+
+      # Merge result context into template context
+      full_context = Map.put(template_context, :result, result_context)
+
+      # Render the template
+      try do
+        case CardigannTemplate.render(text_template, full_context, url_encode: false) do
+          {:ok, rendered_value} ->
+            # Apply any filters to the rendered value
+            apply_filters(String.trim(rendered_value), filters, template_context)
+
+          {:error, reason} ->
+            Logger.debug("Text field template render failed: #{inspect(reason)}")
+            {:error, reason}
+        end
+      rescue
+        e ->
+          Logger.warning(
+            "Template render exception: #{inspect(e)}, template: #{inspect(text_template)}"
+          )
+
+          {:error, {:template_exception, e}}
+      end
+    end
+  end
+
+  # Fallback for non-map configs
+  defp compute_text_field(_field_config, _extracted_values, _template_context) do
+    {:error, :invalid_field_config}
+  end
+
+  # Combine compound fields like title_default/title_optional into a single title field
+  # This handles Cardigann definitions that use field variants for fallback logic
+  defp combine_compound_fields(field_values) do
+    field_values
+    |> combine_title_fields()
+    |> combine_download_fields()
+  end
+
+  defp combine_title_fields(field_values) do
+    title_default = field_values[:title_default] || field_values["title_default"]
+    title_optional = field_values[:title_optional] || field_values["title_optional"]
+    existing_title = field_values[:title] || field_values["title"]
+
+    # If we already have a title, don't override
+    if existing_title && existing_title != "" do
+      field_values
+    else
+      # Use title_optional if default contains "..." (truncated), otherwise use default
+      title =
+        cond do
+          title_optional && title_optional != "" && title_default &&
+              String.contains?(title_default || "", "...") ->
+            title_optional
+
+          title_default && title_default != "" ->
+            title_default
+
+          title_optional && title_optional != "" ->
+            title_optional
+
+          true ->
+            nil
+        end
+
+      if title do
+        field_values
+        |> Map.put(:title, title)
+        |> Map.delete(:title_default)
+        |> Map.delete(:title_optional)
+        |> Map.delete("title_default")
+        |> Map.delete("title_optional")
+      else
+        field_values
+      end
+    end
+  end
+
+  defp combine_download_fields(field_values) do
+    # Handle download/download2 fallback pattern
+    download = field_values[:download] || field_values["download"]
+    download2 = field_values[:download2] || field_values["download2"]
+
+    cond do
+      download && download != "" ->
+        field_values
+
+      download2 && download2 != "" ->
+        field_values
+        |> Map.put(:download, download2)
+        |> Map.delete(:download2)
+        |> Map.delete("download2")
+
+      true ->
+        field_values
+    end
+  end
+
   defp extract_field_value(row, field_config, template_context) when is_map(field_config) do
     selector = Map.get(field_config, :selector) || Map.get(field_config, "selector")
     attribute = Map.get(field_config, :attribute) || Map.get(field_config, "attribute")
@@ -429,6 +641,11 @@ defmodule Mydia.Indexers.CardigannResultParser do
          {:ok, filtered_value} <- apply_filters(raw_value, filters, template_context) do
       {:ok, filtered_value}
     end
+  end
+
+  # Fallback for non-map field configs
+  defp extract_field_value(_row, _field_config, _template_context) do
+    {:error, :invalid_field_config}
   end
 
   defp extract_raw_value(row, selector, nil) do
@@ -602,10 +819,42 @@ defmodule Mydia.Indexers.CardigannResultParser do
     {:ok, String.trim(value)}
   end
 
+  # split filter - splits string by delimiter and returns the part at the given index
+  # args: [delimiter, index] where index is 0-based
+  defp apply_single_filter(value, %{name: "split", args: [delimiter, index]}) do
+    apply_split_filter(value, delimiter, index)
+  end
+
+  defp apply_single_filter(value, %{"name" => "split", "args" => [delimiter, index]}) do
+    apply_split_filter(value, delimiter, index)
+  end
+
+  # urldecode filter - decodes URL-encoded strings
+  defp apply_single_filter(value, %{name: "urldecode"}) do
+    {:ok, URI.decode(value)}
+  end
+
+  defp apply_single_filter(value, %{"name" => "urldecode"}) do
+    {:ok, URI.decode(value)}
+  end
+
   defp apply_single_filter(value, _unknown_filter) do
     # Unknown filter, just pass through
     {:ok, value}
   end
+
+  # Helper for split filter
+  defp apply_split_filter(value, delimiter, index) when is_binary(value) do
+    parts = String.split(value, delimiter)
+    index = if is_binary(index), do: String.to_integer(index), else: index
+
+    case Enum.at(parts, index) do
+      nil -> {:ok, ""}
+      part -> {:ok, part}
+    end
+  end
+
+  defp apply_split_filter(value, _delimiter, _index), do: {:ok, value}
 
   # Applies regex replacement with Go-to-PCRE pattern conversion
   defp apply_re_replace(value, pattern, replacement) do
@@ -766,16 +1015,20 @@ defmodule Mydia.Indexers.CardigannResultParser do
 
   # Result Transformation
 
-  defp transform_to_search_results(parsed_rows, indexer_name, base_url) do
+  defp transform_to_search_results(parsed_rows, indexer_name, base_url, category_mappings) do
     parsed_rows
-    |> Enum.map(fn row -> transform_to_search_result(row, indexer_name, base_url) end)
+    |> Enum.map(fn row ->
+      transform_to_search_result(row, indexer_name, base_url, category_mappings)
+    end)
     |> Enum.filter(&(&1 != nil))
   end
 
-  defp transform_to_search_result(row, indexer_name, base_url) do
+  defp transform_to_search_result(row, indexer_name, base_url, category_mappings) do
+    raw_size = get_field(row, "size", "0")
+
     with {:ok, title} <- get_required_field(row, "title"),
          {:ok, download_url} <- get_required_field(row, "download"),
-         size <- parse_size(get_field(row, "size", "0")),
+         size <- parse_size_with_title_fallback(raw_size, title),
          seeders <- parse_integer(get_field(row, "seeders", "0")),
          leechers <- parse_integer(get_field(row, "leechers", "0")) do
       # Parse quality from title
@@ -788,6 +1041,10 @@ defmodule Mydia.Indexers.CardigannResultParser do
       # Detect download protocol from URL
       download_protocol = detect_download_protocol(resolved_download_url)
 
+      # Map site-specific category to Torznab category
+      raw_category = get_field(row, "category")
+      torznab_category = map_category(raw_category, category_mappings)
+
       # Build SearchResult
       %SearchResult{
         title: title,
@@ -797,7 +1054,7 @@ defmodule Mydia.Indexers.CardigannResultParser do
         download_url: resolved_download_url,
         info_url: resolved_info_url,
         indexer: indexer_name,
-        category: parse_integer(get_field(row, "category")),
+        category: torznab_category,
         published_at: parse_date(get_field(row, "date")),
         quality: quality,
         tmdb_id: parse_integer(get_field(row, "tmdbid")),
@@ -807,6 +1064,28 @@ defmodule Mydia.Indexers.CardigannResultParser do
     else
       _ -> nil
     end
+  end
+
+  # Maps a site-specific category to a Torznab category ID
+  defp map_category(nil, _category_mappings), do: nil
+  defp map_category("", _category_mappings), do: nil
+
+  defp map_category(raw_category, category_mappings)
+       when is_list(category_mappings) and length(category_mappings) > 0 do
+    # Try to map using the category mappings from the definition
+    case CategoryMapping.map_site_category_to_torznab(raw_category, category_mappings) do
+      nil ->
+        # Fallback: check if raw_category is already a Torznab ID
+        parse_integer(raw_category)
+
+      torznab_id ->
+        torznab_id
+    end
+  end
+
+  defp map_category(raw_category, _category_mappings) do
+    # No mappings available, just parse as integer (might already be Torznab ID)
+    parse_integer(raw_category)
   end
 
   # Resolve a URL relative to a base URL
@@ -866,13 +1145,63 @@ defmodule Mydia.Indexers.CardigannResultParser do
   end
 
   @doc """
+  Parses size with fallback to extracting from title.
+
+  When the size field is empty or parses to 0, attempts to extract size
+  from the title text using patterns like "(3.05Gb)" or "500MB".
+  """
+  @spec parse_size_with_title_fallback(String.t() | nil, String.t()) :: non_neg_integer()
+  def parse_size_with_title_fallback(raw_size, title) do
+    size = parse_size(raw_size)
+
+    if size == 0 do
+      # Try to extract size from title
+      extract_size_from_text(title)
+    else
+      size
+    end
+  end
+
+  # Extracts size from text containing embedded size like "(3.05Gb)" or "500MB"
+  defp extract_size_from_text(text) when is_binary(text) do
+    # Match patterns like (3.05Gb), 500MB, 1.2 GB, etc.
+    case Regex.run(~r/([\d.]+)\s*(gb|gib|mb|mib|kb|kib|tb|tib)/i, text) do
+      [_, num_str, unit] ->
+        case Float.parse(num_str) do
+          {num, _} ->
+            multiplier = size_unit_multiplier(String.downcase(unit))
+            trunc(num * multiplier)
+
+          :error ->
+            0
+        end
+
+      nil ->
+        0
+    end
+  end
+
+  defp extract_size_from_text(_), do: 0
+
+  defp size_unit_multiplier("tb"), do: 1024 * 1024 * 1024 * 1024
+  defp size_unit_multiplier("tib"), do: 1024 * 1024 * 1024 * 1024
+  defp size_unit_multiplier("gb"), do: 1024 * 1024 * 1024
+  defp size_unit_multiplier("gib"), do: 1024 * 1024 * 1024
+  defp size_unit_multiplier("mb"), do: 1024 * 1024
+  defp size_unit_multiplier("mib"), do: 1024 * 1024
+  defp size_unit_multiplier("kb"), do: 1024
+  defp size_unit_multiplier("kib"), do: 1024
+  defp size_unit_multiplier(_), do: 1
+
+  @doc """
   Parses size strings to bytes.
 
-  Supports various formats:
+  Supports various formats (case-insensitive):
   - "1.5 GB" → 1_610_612_736 bytes
   - "500 MB" → 524_288_000 bytes
   - "1024 KB" → 1_048_576 bytes
   - "1024" → 1024 bytes
+  - "3.05Gb" → (lowercase units supported)
 
   ## Examples
 
@@ -888,18 +1217,19 @@ defmodule Mydia.Indexers.CardigannResultParser do
 
   def parse_size(size_str) when is_binary(size_str) do
     size_str = String.trim(size_str)
+    size_str_lower = String.downcase(size_str)
 
     cond do
-      String.contains?(size_str, "GB") || String.contains?(size_str, "GiB") ->
+      String.contains?(size_str_lower, "gb") || String.contains?(size_str_lower, "gib") ->
         parse_size_value(size_str, 1024 * 1024 * 1024)
 
-      String.contains?(size_str, "MB") || String.contains?(size_str, "MiB") ->
+      String.contains?(size_str_lower, "mb") || String.contains?(size_str_lower, "mib") ->
         parse_size_value(size_str, 1024 * 1024)
 
-      String.contains?(size_str, "KB") || String.contains?(size_str, "KiB") ->
+      String.contains?(size_str_lower, "kb") || String.contains?(size_str_lower, "kib") ->
         parse_size_value(size_str, 1024)
 
-      String.contains?(size_str, "TB") || String.contains?(size_str, "TiB") ->
+      String.contains?(size_str_lower, "tb") || String.contains?(size_str_lower, "tib") ->
         parse_size_value(size_str, 1024 * 1024 * 1024 * 1024)
 
       true ->
@@ -909,11 +1239,19 @@ defmodule Mydia.Indexers.CardigannResultParser do
   end
 
   defp parse_size_value(size_str, multiplier) do
-    # Extract numeric value from string
+    # Extract numeric value from string, looking for patterns like "3.05Gb" or "500 MB"
+    # First try to find a number immediately before or after the unit
     numeric_part =
-      size_str
-      |> String.replace(~r/[^\d.]/, "")
-      |> String.trim()
+      case Regex.run(~r/([\d.]+)\s*(?:gb|gib|mb|mib|kb|kib|tb|tib)/i, size_str) do
+        [_, num] ->
+          num
+
+        nil ->
+          # Fallback: just extract all digits and periods
+          size_str
+          |> String.replace(~r/[^\d.]/, "")
+          |> String.trim()
+      end
 
     case Float.parse(numeric_part) do
       {value, _} -> trunc(value * multiplier)

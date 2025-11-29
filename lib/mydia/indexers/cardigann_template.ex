@@ -540,6 +540,23 @@ defmodule Mydia.Indexers.CardigannTemplate do
     value
   end
 
+  defp resolve_field(["Result", key], ctx) do
+    # Access previously extracted field values
+    # The result context is stored under :result key
+    result = ctx[:result] || %{}
+
+    value =
+      Map.get(result, key) ||
+        try do
+          Map.get(result, String.to_existing_atom(key))
+        rescue
+          ArgumentError -> nil
+        end
+
+    Logger.debug("Resolved field .Result.#{key} => #{inspect(value)}")
+    value
+  end
+
   defp resolve_field(["Categories"], ctx) do
     value = ctx[:categories] || []
     Logger.debug("Resolved field .Categories => #{inspect(value)}")
