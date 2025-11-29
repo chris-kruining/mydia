@@ -32,6 +32,7 @@ defmodule Mydia.Downloads do
     Registry.register(:qbittorrent, Mydia.Downloads.Client.QBittorrent)
     Registry.register(:transmission, Mydia.Downloads.Client.Transmission)
     Registry.register(:rtorrent, Mydia.Downloads.Client.Rtorrent)
+    Registry.register(:blackhole, Mydia.Downloads.Client.Blackhole)
     Registry.register(:sabnzbd, Mydia.Downloads.Client.Sabnzbd)
     Registry.register(:nzbget, Mydia.Downloads.Client.Nzbget)
     Registry.register(:http, Mydia.Downloads.Client.HTTP)
@@ -925,6 +926,7 @@ defmodule Mydia.Downloads do
   defp get_adapter_module(:qbittorrent), do: Mydia.Downloads.Client.QBittorrent
   defp get_adapter_module(:transmission), do: Mydia.Downloads.Client.Transmission
   defp get_adapter_module(:rtorrent), do: Mydia.Downloads.Client.Rtorrent
+  defp get_adapter_module(:blackhole), do: Mydia.Downloads.Client.Blackhole
   defp get_adapter_module(:http), do: Mydia.Downloads.Client.HTTP
   defp get_adapter_module(:sabnzbd), do: Mydia.Downloads.Client.Sabnzbd
   defp get_adapter_module(:nzbget), do: Mydia.Downloads.Client.Nzbget
@@ -940,6 +942,7 @@ defmodule Mydia.Downloads do
       password: config.password,
       url_base: config.url_base,
       api_key: config.api_key,
+      connection_settings: config.connection_settings || %{},
       options: config.connection_settings || %{}
     }
   end

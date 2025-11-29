@@ -951,22 +951,35 @@ defmodule Mydia.Jobs.MediaImport do
 
   defp get_adapter_module(:qbittorrent), do: Mydia.Downloads.Client.QBittorrent
   defp get_adapter_module(:transmission), do: Mydia.Downloads.Client.Transmission
+  defp get_adapter_module(:rtorrent), do: Mydia.Downloads.Client.Rtorrent
+  defp get_adapter_module(:blackhole), do: Mydia.Downloads.Client.Blackhole
   defp get_adapter_module(:http), do: Mydia.Downloads.Client.HTTP
   defp get_adapter_module(_), do: nil
 
   defp build_client_config(client_config) do
-    %{
-      type: client_config.type,
-      host: client_config.host,
-      port: client_config.port,
-      username: client_config.username,
-      password: client_config.password,
-      use_ssl: client_config.use_ssl || false,
-      options:
-        %{}
-        |> maybe_put(:url_base, client_config.url_base)
-        |> maybe_put(:api_key, client_config.api_key)
-    }
+    case client_config.type do
+      :blackhole ->
+        # Blackhole uses connection_settings for folder paths
+        %{
+          type: :blackhole,
+          connection_settings: client_config.connection_settings || %{}
+        }
+
+      _ ->
+        # Network-based clients
+        %{
+          type: client_config.type,
+          host: client_config.host,
+          port: client_config.port,
+          username: client_config.username,
+          password: client_config.password,
+          use_ssl: client_config.use_ssl || false,
+          options:
+            %{}
+            |> maybe_put(:url_base, client_config.url_base)
+            |> maybe_put(:api_key, client_config.api_key)
+        }
+    end
   end
 
   defp maybe_put(map, _key, nil), do: map

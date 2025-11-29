@@ -1,6 +1,6 @@
 defmodule Mydia.Settings.DownloadClientConfig do
   @moduledoc """
-  Schema for download client configurations (qBittorrent, Transmission, rTorrent, HTTP).
+  Schema for download client configurations (qBittorrent, Transmission, rTorrent, Blackhole, HTTP).
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -8,7 +8,7 @@ defmodule Mydia.Settings.DownloadClientConfig do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @client_types [:qbittorrent, :transmission, :rtorrent, :http, :sabnzbd, :nzbget]
+  @client_types [:qbittorrent, :transmission, :rtorrent, :blackhole, :http, :sabnzbd, :nzbget]
 
   schema "download_client_configs" do
     field :name, :string
@@ -53,10 +53,36 @@ defmodule Mydia.Settings.DownloadClientConfig do
       :connection_settings,
       :updated_by_id
     ])
-    |> validate_required([:name, :type, :host, :port])
+    |> validate_required([:name, :type])
     |> validate_inclusion(:type, @client_types)
-    |> validate_number(:port, greater_than: 0, less_than: 65536)
+    |> validate_by_type()
     |> validate_number(:priority, greater_than: 0)
     |> unique_constraint(:name)
+  end
+
+  # Blackhole clients use filesystem paths instead of network config
+  defp validate_by_type(changeset) do
+    case get_field(changeset, :type) do
+      :blackhole ->
+        changeset
+        |> validate_blackhole_config()
+
+      _network_client ->
+        changeset
+        |> validate_required([:host, :port])
+        |> validate_number(:port, greater_than: 0, less_than: 65536)
+    end
+  end
+
+  defp validate_blackhole_config(changeset) do
+    case get_field(changeset, :connection_settings) do
+      %{"watch_folder" => watch, "completed_folder" => completed}
+      when is_binary(watch) and is_binary(completed) and watch != "" and completed != "" ->
+        changeset
+
+      _ ->
+        changeset
+        |> add_error(:connection_settings, "must include watch_folder and completed_folder")
+    end
   end
 end
