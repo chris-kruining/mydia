@@ -128,7 +128,7 @@ defmodule Mydia.Jobs.MetadataRefresh do
         {:ok, metadata} ->
           attrs = build_update_attrs(metadata, media_type)
 
-          case Media.update_media_item(media_item, attrs) do
+          case Media.update_media_item(media_item, attrs, reason: "Metadata refreshed") do
             {:ok, updated_item} ->
               Logger.info("Successfully refreshed metadata",
                 media_item_id: updated_item.id,

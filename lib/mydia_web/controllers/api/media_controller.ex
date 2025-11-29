@@ -209,7 +209,7 @@ defmodule MydiaWeb.Api.MediaController do
 
     Repo.transaction(fn ->
       # Update the media item
-      case Media.update_media_item(media_item, attrs) do
+      case Media.update_media_item(media_item, attrs, reason: "Manually matched") do
         {:ok, updated_media_item} ->
           # For TV shows, refresh episodes if requested
           if media_item.type == "tv_show" and fetch_episodes do

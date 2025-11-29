@@ -174,7 +174,7 @@ defmodule Mydia.Library.MetadataEnricher do
     case fetch_full_metadata(provider_id, media_type, config) do
       {:ok, full_metadata} ->
         attrs = build_media_item_attrs(full_metadata, media_type, %{})
-        Media.update_media_item(existing_item, attrs)
+        Media.update_media_item(existing_item, attrs, reason: "Metadata enriched")
 
       {:error, reason} ->
         Logger.warning("Failed to fetch updated metadata, returning existing item",

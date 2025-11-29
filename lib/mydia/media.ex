@@ -85,6 +85,7 @@ defmodule Mydia.Media do
   ## Options
     - `:actor_type` - The type of actor (:user, :system, :job) - defaults to :system
     - `:actor_id` - The ID of the actor (user_id, job name, etc.)
+    - `:reason` - Description of what was updated (e.g., "Metadata refreshed") - defaults to "Updated"
   """
   def update_media_item(%MediaItem{} = media_item, attrs, opts \\ []) do
     result =
@@ -97,8 +98,9 @@ defmodule Mydia.Media do
         # Track event
         actor_type = Keyword.get(opts, :actor_type, :system)
         actor_id = Keyword.get(opts, :actor_id, "media_context")
+        reason = Keyword.get(opts, :reason, "Updated")
 
-        Events.media_item_updated(updated_media_item, actor_type, actor_id)
+        Events.media_item_updated(updated_media_item, actor_type, actor_id, reason)
 
         {:ok, updated_media_item}
 
@@ -1058,7 +1060,7 @@ defmodule Mydia.Media do
             )
 
             # Update the media item with the recovered TMDB ID
-            case update_media_item(media_item, %{tmdb_id: tmdb_id}) do
+            case update_media_item(media_item, %{tmdb_id: tmdb_id}, reason: "TMDB ID recovered") do
               {:ok, updated_item} ->
                 {:ok, tmdb_id, updated_item}
 

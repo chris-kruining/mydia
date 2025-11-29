@@ -182,11 +182,11 @@ defmodule MydiaWeb.MediaLive.Index do
     selection_mode = !socket.assigns.selection_mode
 
     socket =
-      if !selection_mode do
+      if selection_mode do
+        socket
+      else
         # Exiting selection mode - clear selection
         assign(socket, :selected_ids, MapSet.new())
-      else
-        socket
       end
 
     {:noreply, assign(socket, :selection_mode, selection_mode)}
@@ -254,7 +254,9 @@ defmodule MydiaWeb.MediaLive.Index do
     media_item = Media.get_media_item!(id)
     new_monitored_status = !media_item.monitored
 
-    case Media.update_media_item(media_item, %{monitored: new_monitored_status}) do
+    case Media.update_media_item(media_item, %{monitored: new_monitored_status},
+           reason: if(new_monitored_status, do: "Monitoring enabled", else: "Monitoring disabled")
+         ) do
       {:ok, _updated_item} ->
         # Refetch with proper preloads to match the stream items
         updated_item_with_preloads =

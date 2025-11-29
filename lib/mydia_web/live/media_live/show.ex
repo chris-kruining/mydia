@@ -128,9 +128,12 @@ defmodule MydiaWeb.MediaLive.Show do
   def handle_event("toggle_monitored", _params, socket) do
     with :ok <- Authorization.authorize_update_media(socket) do
       media_item = socket.assigns.media_item
+      new_monitored = !media_item.monitored
 
       {:ok, updated_item} =
-        Media.update_media_item(media_item, %{monitored: !media_item.monitored})
+        Media.update_media_item(media_item, %{monitored: new_monitored},
+          reason: if(new_monitored, do: "Monitoring enabled", else: "Monitoring disabled")
+        )
 
       {:noreply,
        socket
@@ -430,7 +433,7 @@ defmodule MydiaWeb.MediaLive.Show do
     with :ok <- Authorization.authorize_update_media(socket) do
       media_item = socket.assigns.media_item
 
-      case Media.update_media_item(media_item, media_params) do
+      case Media.update_media_item(media_item, media_params, reason: "Settings updated") do
         {:ok, updated_item} ->
           {:noreply,
            socket
