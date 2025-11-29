@@ -19,6 +19,10 @@ defmodule Mydia.Settings.LibraryPath do
     field :last_scan_at, :utc_datetime
     field :last_scan_status, Ecto.Enum, values: @scan_statuses
     field :last_scan_error, :string
+    # Tracks if this library path was created from environment variables
+    field :from_env, :boolean, default: false
+    # Controls whether the library path is hidden from the UI
+    field :disabled, :boolean, default: false
 
     belongs_to :quality_profile, Mydia.Settings.QualityProfile
     belongs_to :updated_by, Mydia.Accounts.User
@@ -40,7 +44,9 @@ defmodule Mydia.Settings.LibraryPath do
       :last_scan_status,
       :last_scan_error,
       :quality_profile_id,
-      :updated_by_id
+      :updated_by_id,
+      :from_env,
+      :disabled
     ])
     |> validate_required([:path, :type])
     |> validate_inclusion(:type, @path_types)
