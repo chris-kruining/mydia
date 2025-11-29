@@ -322,66 +322,40 @@
                     </div>
                   <% end %>
                 </td>
-                <%!-- Source Column (Indexer + Category + Date) --%>
+                <%!-- Source Column (Category + Indexer + Date) --%>
                 <td class="hidden lg:table-cell">
                   <div class="flex flex-col gap-1">
                     <div class="flex flex-wrap gap-1">
                       <% lib_type = detected_library_type(result) %>
-                      <span
-                        class={["badge badge-sm gap-1", library_type_badge_class(lib_type)]}
-                        title={"Will download to: #{library_type_label(lib_type)}"}
-                      >
-                        <.icon name={library_type_icon(lib_type)} class="w-3 h-3" />
+                      <span class={["badge badge-sm", library_type_badge_class(lib_type)]}>
                         {library_type_label(lib_type)}
                       </span>
                       <span class="badge badge-outline badge-sm">{result.indexer}</span>
                     </div>
-                    <span class="text-xs text-base-content/60">
-                      {format_date(result.published_at)}
-                    </span>
+                    <%= if result.published_at do %>
+                      <span class="text-xs text-base-content/60">
+                        {format_date(result.published_at)}
+                      </span>
+                    <% end %>
                   </div>
                 </td>
                 <%!-- Actions Column --%>
                 <td class="text-right">
-                  <% action_lib_type = detected_library_type(result) %>
                   <%= if @current_user && @current_user.role == "guest" do %>
-                    <%!-- Guest users cannot download directly from search --%>
                     <div class="tooltip tooltip-left" data-tip="Please use the request system">
                       <button class="btn btn-sm btn-ghost" disabled>
                         <.icon name="hero-lock-closed" class="w-4 h-4" />
-                        <span class="hidden xl:inline">Restricted</span>
                       </button>
                     </div>
                   <% else %>
-                    <%!-- Admin users can download - show detected library type --%>
-                    <div class="flex items-center justify-end gap-1">
-                      <div
-                        class="tooltip tooltip-left"
-                        data-tip={
-                          if action_lib_type == :unknown,
-                            do: "Category not detected - select manually",
-                            else: "Will download to: #{library_type_label(action_lib_type)}"
-                        }
-                      >
-                        <span class={[
-                          "badge badge-sm gap-0.5",
-                          library_type_badge_class(action_lib_type)
-                        ]}>
-                          <.icon name={library_type_icon(action_lib_type)} class="w-3 h-3" />
-                          <span class="hidden sm:inline">
-                            {library_type_label(action_lib_type)}
-                          </span>
-                        </span>
-                      </div>
-                      <button
-                        class="btn btn-sm btn-primary"
-                        phx-click="show_download_modal"
-                        phx-value-download_url={result.download_url}
-                        title="Download to library"
-                      >
-                        <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
-                      </button>
-                    </div>
+                    <button
+                      class="btn btn-sm btn-primary"
+                      phx-click="show_download_modal"
+                      phx-value-download_url={result.download_url}
+                      title="Download to library"
+                    >
+                      <.icon name="hero-arrow-down-tray" class="w-4 h-4" />
+                    </button>
                   <% end %>
                 </td>
               </tr>

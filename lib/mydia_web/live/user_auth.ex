@@ -134,9 +134,10 @@ defmodule MydiaWeb.Live.UserAuth do
     {:cont, socket}
   end
 
-  # Get a MapSet of library types that have at least one library path configured
+  # Get a MapSet of library types that have at least one enabled library path
   defp get_configured_library_types do
     Mydia.Settings.list_library_paths()
+    |> Enum.reject(& &1.disabled)
     |> Enum.map(& &1.type)
     |> MapSet.new()
   end

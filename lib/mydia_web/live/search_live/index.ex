@@ -53,8 +53,8 @@ defmodule MydiaWeb.SearchLive.Index do
       |> Enum.map(& &1.id)
       |> MapSet.new()
 
-    # Load library paths for download target selector
-    library_paths = Settings.list_library_paths()
+    # Load library paths for download target selector (exclude disabled paths)
+    library_paths = Settings.list_library_paths() |> Enum.reject(& &1.disabled)
 
     {:ok,
      socket
