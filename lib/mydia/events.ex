@@ -279,13 +279,14 @@ defmodule Mydia.Events do
     - `media_item` - The MediaItem struct
     - `actor_type` - :user, :system, or :job
     - `actor_id` - The ID of the actor
+    - `reason` - A description of what was updated (e.g., "Metadata refreshed", "Settings updated")
 
   ## Examples
 
-      iex> media_item_updated(media_item, :job, "metadata_refresh")
+      iex> media_item_updated(media_item, :job, "metadata_refresh", "Metadata refreshed")
       :ok
   """
-  def media_item_updated(media_item, actor_type, actor_id) do
+  def media_item_updated(media_item, actor_type, actor_id, reason \\ "Updated") do
     create_event_async(%{
       category: "media",
       type: "media_item.updated",
@@ -295,7 +296,8 @@ defmodule Mydia.Events do
       resource_id: media_item.id,
       metadata: %{
         "title" => media_item.title,
-        "media_type" => media_item.type
+        "media_type" => media_item.type,
+        "reason" => reason
       }
     })
   end
@@ -821,7 +823,9 @@ defmodule Mydia.Events do
   end
 
   defp build_event_description(%Event{type: "media_item.updated", metadata: metadata}) do
-    metadata["title"] || "Media item updated"
+    title = metadata["title"] || "Media item"
+    reason = metadata["reason"] || "updated"
+    "#{title} - #{String.downcase(reason)}"
   end
 
   defp build_event_description(%Event{type: "media_item.removed", metadata: metadata}) do

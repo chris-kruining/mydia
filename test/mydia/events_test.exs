@@ -524,14 +524,14 @@ defmodule Mydia.EventsTest do
       assert event.metadata["tmdb_id"] == 12345
     end
 
-    test "media_item_updated/3 creates correct event" do
+    test "media_item_updated/4 creates correct event with reason" do
       media_item = %Mydia.Media.MediaItem{
         id: Ecto.UUID.generate(),
         title: "Test Show",
         type: "tv_show"
       }
 
-      Events.media_item_updated(media_item, :job, "metadata_refresh")
+      Events.media_item_updated(media_item, :job, "metadata_refresh", "Metadata refreshed")
       Process.sleep(100)
 
       [event] = Events.list_events(type: "media_item.updated")
@@ -540,6 +540,21 @@ defmodule Mydia.EventsTest do
       assert event.actor_id == "metadata_refresh"
       assert event.metadata["title"] == "Test Show"
       assert event.metadata["media_type"] == "tv_show"
+      assert event.metadata["reason"] == "Metadata refreshed"
+    end
+
+    test "media_item_updated/3 uses default reason" do
+      media_item = %Mydia.Media.MediaItem{
+        id: Ecto.UUID.generate(),
+        title: "Test Movie",
+        type: "movie"
+      }
+
+      Events.media_item_updated(media_item, :system, "test")
+      Process.sleep(100)
+
+      [event] = Events.list_events(type: "media_item.updated")
+      assert event.metadata["reason"] == "Updated"
     end
 
     test "media_item_removed/3 creates correct event" do
