@@ -23,7 +23,13 @@ defmodule MydiaWeb.ImportMediaLive.Index do
     |> assign(:importing, false)
     |> assign(:discovered_files, [])
     |> assign(:matched_files, [])
-    |> assign(:grouped_files, %{series: [], movies: [], ungrouped: [], type_filtered: []})
+    |> assign(:grouped_files, %{
+      series: [],
+      movies: [],
+      ungrouped: [],
+      type_filtered: [],
+      simple: []
+    })
     |> assign(:selected_files, MapSet.new())
     |> assign(:scan_stats, %{
       total: 0,
@@ -209,7 +215,13 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       |> assign(:selected_library_path, nil)
       |> assign(:discovered_files, [])
       |> assign(:matched_files, [])
-      |> assign(:grouped_files, %{series: [], movies: [], ungrouped: [], type_filtered: []})
+      |> assign(:grouped_files, %{
+        series: [],
+        movies: [],
+        ungrouped: [],
+        type_filtered: [],
+        simple: []
+      })
       |> assign(:selected_files, MapSet.new())
       |> assign(:scan_stats, %{
         total: 0,
@@ -600,7 +612,11 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
   @impl true
   def handle_info({:perform_scan, path}, socket) do
-    case Scanner.scan(path) do
+    library_path = socket.assigns.selected_library_path
+    # Use library-type-specific file extensions
+    extensions = Scanner.extensions_for_library_type(library_path && library_path.type)
+
+    case Scanner.scan(path, video_extensions: extensions) do
       {:ok, scan_result} ->
         # Get existing files from database (preload library_path for absolute_path resolution)
         # Only skip files that have valid parent associations (not orphaned)
@@ -675,6 +691,120 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   def handle_info({:match_files, files}, socket) do
     library_path = socket.assigns.selected_library_path
 
+    # For specialized library types, skip metadata matching entirely
+    if specialized_library?(library_path) do
+      handle_specialized_library_files(files, socket)
+    else
+      handle_standard_library_files(files, socket)
+    end
+  end
+
+  def handle_info(:perform_import, socket) do
+    selected_indices = MapSet.to_list(socket.assigns.selected_files)
+    selected_files = Enum.map(selected_indices, &Enum.at(socket.assigns.matched_files, &1))
+
+    # Import each file and collect detailed results
+    detailed_results =
+      Enum.with_index(selected_files)
+      |> Enum.map(fn {matched_file, idx} ->
+        # Update progress with current file
+        file_name = Path.basename(matched_file.file.path)
+        send(self(), {:update_import_progress, idx + 1, file_name})
+
+        import_file_with_details(matched_file, socket.assigns.metadata_config)
+      end)
+
+    success_count = Enum.count(detailed_results, &(&1.status == :success))
+    failed_count = Enum.count(detailed_results, &(&1.status == :failed))
+    skipped_count = Enum.count(detailed_results, &(&1.status == :skipped))
+
+    socket =
+      socket
+      |> assign(:importing, false)
+      |> assign(:step, :complete)
+      |> assign(:import_results, %{
+        success: success_count,
+        failed: failed_count,
+        skipped: skipped_count
+      })
+      |> assign(:detailed_results, detailed_results)
+      |> persist_session()
+
+    # Mark session as completed
+    if socket.assigns.import_session do
+      Library.complete_import_session(socket.assigns.import_session)
+    end
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:update_import_progress, current, current_file}, socket) do
+    {:noreply,
+     assign(socket, :import_progress, %{
+       socket.assigns.import_progress
+       | current: current,
+         current_file: current_file
+     })}
+  end
+
+  ## Specialized Library Handling
+
+  defp specialized_library?(nil), do: false
+  defp specialized_library?(%{type: type}), do: type in [:music, :books, :adult]
+
+  # Handle files for specialized libraries (music, books, adult)
+  # These don't need metadata matching - just create a simple file listing
+  defp handle_specialized_library_files(files, socket) do
+    # Create matched_files structure without metadata matching
+    matched_files =
+      Enum.map(files, fn file ->
+        %{
+          file: file,
+          match_result: nil,
+          import_status: :pending
+        }
+      end)
+
+    # Group all files under the "simple" category for specialized libraries
+    grouped_files = %{
+      series: [],
+      movies: [],
+      ungrouped: [],
+      type_filtered: [],
+      simple: matched_files
+    }
+
+    # Auto-select all files (user can deselect if needed)
+    auto_selected =
+      matched_files
+      |> Enum.with_index()
+      |> Enum.map(fn {_file, idx} -> idx end)
+      |> MapSet.new()
+
+    socket =
+      socket
+      |> assign(:matching, false)
+      |> assign(:step, :review)
+      |> assign(:matched_files, matched_files)
+      |> assign(:grouped_files, grouped_files)
+      |> assign(:selected_files, auto_selected)
+      |> assign(:scan_stats, %{
+        total: length(files),
+        matched: length(files),
+        unmatched: 0,
+        skipped: socket.assigns.scan_stats.skipped,
+        type_filtered: 0
+      })
+      |> persist_session()
+
+    {:noreply, socket}
+  end
+
+  # Handle files for standard libraries (movies, series, mixed)
+  # These use metadata matching to identify content
+  defp handle_standard_library_files(files, socket) do
+    library_path = socket.assigns.selected_library_path
+
     # Match files with TMDB in batches for better UX
     matched_files =
       Enum.map(files, fn file ->
@@ -733,54 +863,6 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       |> persist_session()
 
     {:noreply, socket}
-  end
-
-  def handle_info(:perform_import, socket) do
-    selected_indices = MapSet.to_list(socket.assigns.selected_files)
-    selected_files = Enum.map(selected_indices, &Enum.at(socket.assigns.matched_files, &1))
-
-    # Import each file and collect detailed results
-    detailed_results =
-      Enum.with_index(selected_files)
-      |> Enum.map(fn {matched_file, idx} ->
-        # Update progress with current file
-        file_name = Path.basename(matched_file.file.path)
-        send(self(), {:update_import_progress, idx + 1, file_name})
-
-        import_file_with_details(matched_file, socket.assigns.metadata_config)
-      end)
-
-    success_count = Enum.count(detailed_results, &(&1.status == :success))
-    failed_count = Enum.count(detailed_results, &(&1.status == :failed))
-    skipped_count = Enum.count(detailed_results, &(&1.status == :skipped))
-
-    socket =
-      socket
-      |> assign(:importing, false)
-      |> assign(:step, :complete)
-      |> assign(:import_results, %{
-        success: success_count,
-        failed: failed_count,
-        skipped: skipped_count
-      })
-      |> assign(:detailed_results, detailed_results)
-      |> persist_session()
-
-    # Mark session as completed
-    if socket.assigns.import_session do
-      Library.complete_import_session(socket.assigns.import_session)
-    end
-
-    {:noreply, socket}
-  end
-
-  def handle_info({:update_import_progress, current, current_file}, socket) do
-    {:noreply,
-     assign(socket, :import_progress, %{
-       socket.assigns.import_progress
-       | current: current,
-         current_file: current_file
-     })}
   end
 
   ## Library Type Filtering
@@ -1039,6 +1121,10 @@ defmodule MydiaWeb.ImportMediaLive.Index do
       {"metadata", metadata} when is_map(metadata) ->
         {:metadata, atomize_keys(metadata)}
 
+      # provider_type needs to be converted back to an atom
+      {"provider_type", value} when is_binary(value) ->
+        {:provider_type, String.to_atom(value)}
+
       {key, value} when is_binary(key) ->
         {String.to_atom(key), value}
 
@@ -1063,15 +1149,59 @@ defmodule MydiaWeb.ImportMediaLive.Index do
   ## Private Helpers
 
   defp import_file_with_details(%{match_result: nil, file: file}, _config) do
-    %{
-      file_path: file.path,
-      file_name: Path.basename(file.path),
-      status: :failed,
-      media_item_title: nil,
-      error_message: "No metadata match found for this file",
-      action_taken: nil,
-      metadata: %{size: file.size}
-    }
+    # Check if this file belongs to a specialized library
+    # If so, import without metadata matching
+    library_paths = Settings.list_library_paths()
+
+    {library_path_id, relative_path} =
+      calculate_relative_path_for_import(file.path, library_paths)
+
+    library_path = Enum.find(library_paths, &(&1.id == library_path_id))
+
+    if library_path && library_path.type in [:music, :books, :adult] do
+      # Import file for specialized library without metadata
+      case Library.create_scanned_media_file(%{
+             relative_path: relative_path,
+             library_path_id: library_path_id,
+             size: file.size,
+             verified_at: DateTime.utc_now()
+           }) do
+        {:ok, _media_file} ->
+          %{
+            file_path: file.path,
+            file_name: Path.basename(file.path),
+            status: :success,
+            media_item_title: Path.basename(file.path, Path.extname(file.path)),
+            error_message: nil,
+            action_taken: "Added to #{library_type_label(library_path.type)} library",
+            metadata: %{size: file.size, library_type: library_path.type}
+          }
+
+        {:error, changeset} ->
+          error_msg = format_changeset_errors(changeset)
+
+          %{
+            file_path: file.path,
+            file_name: Path.basename(file.path),
+            status: :failed,
+            media_item_title: nil,
+            error_message: "Database error: #{error_msg}",
+            action_taken: nil,
+            metadata: %{size: file.size}
+          }
+      end
+    else
+      # Standard library file without metadata match - report failure
+      %{
+        file_path: file.path,
+        file_name: Path.basename(file.path),
+        status: :failed,
+        media_item_title: nil,
+        error_message: "No metadata match found for this file",
+        action_taken: nil,
+        metadata: %{size: file.size}
+      }
+    end
   end
 
   defp import_file_with_details(%{file: file, match_result: match_result}, config) do
@@ -1188,6 +1318,19 @@ defmodule MydiaWeb.ImportMediaLive.Index do
 
     "Imported #{media_type}: '#{match_result.title}'"
   end
+
+  defp library_type_label(:music), do: "Music"
+  defp library_type_label(:books), do: "Books"
+  defp library_type_label(:adult), do: "Adult"
+  defp library_type_label(type), do: to_string(type)
+
+  defp format_changeset_errors(%Ecto.Changeset{errors: errors}) do
+    errors
+    |> Enum.map(fn {field, {msg, _}} -> "#{field} #{msg}" end)
+    |> Enum.join(", ")
+  end
+
+  defp format_changeset_errors(other), do: format_error(other)
 
   defp format_error(:not_found), do: "Directory not found"
   defp format_error(:not_directory), do: "Path is not a directory"
@@ -1320,4 +1463,23 @@ defmodule MydiaWeb.ImportMediaLive.Index do
         {library_path.id, relative_path}
     end
   end
+
+  # Helper functions for specialized library UI
+  defp library_type_icon(:music), do: "hero-musical-note"
+  defp library_type_icon(:books), do: "hero-book-open"
+  defp library_type_icon(:adult), do: "hero-eye-slash"
+  defp library_type_icon(:series), do: "hero-tv"
+  defp library_type_icon(:movies), do: "hero-film"
+  defp library_type_icon(:mixed), do: "hero-square-3-stack-3d"
+  defp library_type_icon(_), do: "hero-folder"
+
+  defp library_type_header_class(:music), do: "bg-success/10"
+  defp library_type_header_class(:books), do: "bg-warning/10"
+  defp library_type_header_class(:adult), do: "bg-error/10"
+  defp library_type_header_class(_), do: "bg-base-200/50"
+
+  defp library_type_plural(:music), do: "Music Files"
+  defp library_type_plural(:books), do: "Books"
+  defp library_type_plural(:adult), do: "Files"
+  defp library_type_plural(_), do: "Files"
 end
