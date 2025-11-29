@@ -4,12 +4,21 @@ defmodule Mydia.Indexers.CardigannParser do
 
   Parses YAML definition strings into structured `CardigannDefinition.Parsed` structs
   that can be used for search execution and validation.
+
+  ## Overrides
+
+  Known bugs in upstream definitions are automatically patched via `CardigannOverrides`.
+  Patches are applied after YAML parsing but before struct building.
   """
 
   alias Mydia.Indexers.CardigannDefinition.Parsed
+  alias Mydia.Indexers.CardigannOverrides
 
   @doc """
   Parses a Cardigann YAML definition string into a structured Parsed struct.
+
+  Automatically applies any registered overrides for known bugs in upstream
+  definitions. See `CardigannOverrides` for the list of active patches.
 
   ## Examples
 
@@ -26,12 +35,21 @@ defmodule Mydia.Indexers.CardigannParser do
   @spec parse_definition(String.t()) :: {:ok, Parsed.t()} | {:error, term()}
   def parse_definition(yaml_string) when is_binary(yaml_string) do
     with {:ok, yaml_data} <- YamlElixir.read_from_string(yaml_string),
+         indexer_id <- Map.get(yaml_data, "id"),
+         yaml_data <- apply_overrides(indexer_id, yaml_data),
          {:ok, parsed} <- build_parsed_struct(yaml_data),
          :ok <- validate_definition(parsed) do
       {:ok, parsed}
     end
   rescue
     e -> {:error, {:parse_error, Exception.message(e)}}
+  end
+
+  # Apply any registered overrides for known bugs
+  defp apply_overrides(nil, yaml_data), do: yaml_data
+
+  defp apply_overrides(indexer_id, yaml_data) do
+    CardigannOverrides.apply_overrides!(indexer_id, yaml_data)
   end
 
   @doc """
