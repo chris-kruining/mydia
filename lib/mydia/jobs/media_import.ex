@@ -120,20 +120,34 @@ defmodule Mydia.Jobs.MediaImport do
             file_count: length(imported_files)
           )
 
-          # Optionally remove from download client
-          if args["cleanup_client"] != false do
+          # Check if we should remove from client based on client config
+          client_info = get_client_info(download)
+          should_cleanup = client_info && client_info.remove_completed
+
+          if should_cleanup do
+            Logger.info("Removing download from client (remove_completed enabled)",
+              download_id: download.id,
+              client: download.download_client
+            )
+
             cleanup_download_client(download)
+          else
+            Logger.info("Keeping download in client for seeding (remove_completed disabled)",
+              download_id: download.id,
+              client: download.download_client
+            )
           end
 
-          # Delete the download record now that import is complete
-          case Downloads.delete_download(download) do
-            {:ok, _deleted} ->
-              Logger.info("Download record deleted after successful import",
+          # Mark download as imported instead of deleting
+          # This allows the download to appear in the Completed tab
+          case Downloads.update_download(download, %{imported_at: DateTime.utc_now()}) do
+            {:ok, _updated} ->
+              Logger.info("Download marked as imported",
                 download_id: download.id
               )
 
             {:error, changeset} ->
-              Logger.warning("Failed to delete download record after import",
+              Logger.warning("Failed to mark download as imported",
                 download_id: download.id,
                 errors: inspect(changeset.errors)
               )
@@ -170,7 +184,8 @@ defmodule Mydia.Jobs.MediaImport do
           %{
             adapter: adapter,
             config: build_client_config(client_config),
-            client_id: download.download_client_id
+            client_id: download.download_client_id,
+            remove_completed: Map.get(client_config, :remove_completed, false)
           }
         end
       end

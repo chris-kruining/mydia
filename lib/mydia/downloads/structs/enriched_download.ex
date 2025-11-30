@@ -40,7 +40,13 @@ defmodule Mydia.Downloads.Structs.EnrichedDownload do
     :save_path,
     :completed_at,
     :error_message,
-    :db_completed_at
+    :db_completed_at,
+    :imported_at,
+    # Import retry tracking (displayed in Issues tab)
+    :import_retry_count,
+    :import_last_error,
+    :import_next_retry_at,
+    :import_failed_at
   ]
 
   @type t :: %__MODULE__{
@@ -72,7 +78,12 @@ defmodule Mydia.Downloads.Structs.EnrichedDownload do
           save_path: String.t() | nil,
           completed_at: DateTime.t() | nil,
           error_message: String.t() | nil,
-          db_completed_at: DateTime.t() | nil
+          db_completed_at: DateTime.t() | nil,
+          imported_at: DateTime.t() | nil,
+          import_retry_count: integer() | nil,
+          import_last_error: String.t() | nil,
+          import_next_retry_at: DateTime.t() | nil,
+          import_failed_at: DateTime.t() | nil
         }
 
   @doc """

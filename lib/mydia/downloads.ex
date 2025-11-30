@@ -286,6 +286,92 @@ defmodule Mydia.Downloads do
   end
 
   @doc """
+  Clears a completed (imported) download.
+
+  This removes the download from the client (always, since user explicitly requested)
+  and deletes the Download record from the database.
+
+  ## Options
+    - `:actor_type` - The type of actor (:user, :system, :job) - defaults to :user
+    - `:actor_id` - The ID of the actor (user_id, job name, etc.)
+  """
+  def clear_completed(%Download{} = download, opts \\ []) do
+    # Try to remove from client first (ignore errors as may already be removed)
+    case find_client_config(download.download_client) do
+      {:ok, client_config} ->
+        case get_adapter_for_client(client_config) do
+          {:ok, adapter} ->
+            client_map_config = config_to_map(client_config)
+
+            # Attempt to remove from client, but don't fail if it's already gone
+            case Client.remove_download(
+                   adapter,
+                   client_map_config,
+                   download.download_client_id,
+                   opts
+                 ) do
+              :ok ->
+                Logger.info("Removed completed download from client",
+                  download_id: download.id,
+                  client: download.download_client
+                )
+
+              {:error, reason} ->
+                Logger.debug("Could not remove from client (may already be removed)",
+                  download_id: download.id,
+                  reason: inspect(reason)
+                )
+            end
+
+          {:error, _} ->
+            Logger.debug("No adapter found for client", client: download.download_client)
+        end
+
+      {:error, _} ->
+        Logger.debug("Client config not found", client: download.download_client)
+    end
+
+    # Always delete the database record
+    case delete_download(download) do
+      {:ok, deleted_download} ->
+        # Track event
+        actor_type = Keyword.get(opts, :actor_type, :user)
+        actor_id = Keyword.get(opts, :actor_id, "unknown")
+
+        Events.download_cleared(download, actor_type, actor_id)
+
+        {:ok, deleted_download}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Clears all completed (imported) downloads.
+
+  Returns the count of successfully cleared downloads.
+  """
+  def clear_all_completed(opts \\ []) do
+    # Get all imported downloads
+    imported_downloads =
+      Download
+      |> where([d], not is_nil(d.imported_at))
+      |> Repo.all()
+
+    results =
+      Enum.map(imported_downloads, fn download ->
+        case clear_completed(download, opts) do
+          {:ok, _} -> :ok
+          {:error, _} -> :error
+        end
+      end)
+
+    success_count = Enum.count(results, &(&1 == :ok))
+    {:ok, success_count}
+  end
+
+  @doc """
   Deletes a download.
   """
   def delete_download(%Download{} = download) do
@@ -832,7 +918,12 @@ defmodule Mydia.Downloads do
         completed_at: download.completed_at || torrent_status.completed_at,
         error_message: download.error_message,
         # Preserve database completed_at for tracking if we've already processed it
-        db_completed_at: download.completed_at
+        db_completed_at: download.completed_at,
+        imported_at: download.imported_at,
+        import_retry_count: download.import_retry_count,
+        import_last_error: download.import_last_error,
+        import_next_retry_at: download.import_next_retry_at,
+        import_failed_at: download.import_failed_at
       })
     else
       # Download not found in client - might be removed or completed
@@ -845,6 +936,7 @@ defmodule Mydia.Downloads do
     # Could be completed and removed, or manually deleted from client
     status =
       cond do
+        download.imported_at -> "imported"
         download.completed_at -> "completed"
         download.error_message -> "failed"
         true -> "missing"
@@ -881,7 +973,12 @@ defmodule Mydia.Downloads do
       completed_at: download.completed_at,
       error_message: download.error_message,
       # Preserve database completed_at for tracking if we've already processed it
-      db_completed_at: download.completed_at
+      db_completed_at: download.completed_at,
+      imported_at: download.imported_at,
+      import_retry_count: download.import_retry_count,
+      import_last_error: download.import_last_error,
+      import_next_retry_at: download.import_next_retry_at,
+      import_failed_at: download.import_failed_at
     })
   end
 
@@ -901,12 +998,23 @@ defmodule Mydia.Downloads do
 
   defp apply_status_filters(downloads, :active) do
     Enum.filter(downloads, fn d ->
-      d.status in ["downloading", "seeding", "checking", "paused"]
+      # Active downloads are those that haven't been imported yet
+      # and are currently downloading, seeding, checking, or paused
+      is_nil(d.imported_at) and d.status in ["downloading", "seeding", "checking", "paused"]
     end)
   end
 
   defp apply_status_filters(downloads, :completed) do
     Enum.filter(downloads, &(&1.status == "completed"))
+  end
+
+  # Filter for imported downloads (shown in Completed tab)
+  # These are downloads that have been successfully imported to the library
+  # but may still be seeding in the download client
+  defp apply_status_filters(downloads, :imported) do
+    Enum.filter(downloads, fn d ->
+      not is_nil(d.imported_at)
+    end)
   end
 
   defp apply_status_filters(downloads, :failed) do
