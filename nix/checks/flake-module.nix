@@ -12,6 +12,11 @@
               enable = true;
 
               secretKeyBaseFile = "/tmp/mydia/secret_key_base";
+
+              database = {
+                type = "postgres";
+                uri = "postgres://localhost/mydia?sslMode=disabled";
+              };
             };
           };
         };

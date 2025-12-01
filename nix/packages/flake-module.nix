@@ -1,4 +1,4 @@
-{inputs, ...}: {
+{...}: {
   perSystem = {
     self',
     system,
@@ -300,6 +300,7 @@
       # Use ffmpeg_6 for compatibility with membrane plugins
       buildInputs = [
         pkgs.sqlite
+        pkgs.postgresql
         pkgs.ffmpeg_6-headless
       ];
 
@@ -307,7 +308,10 @@
       dontStrip = true;
 
       # Set HOME to a writable directory for elixir_make cache
-      HOME = "/tmp";
+      env = {
+        HOME = "/tmp";
+        DATABASE_TYPE = "postgres";
+      };
 
       # Remove dev/test dependencies from the build
       removeCookie = false;
@@ -366,7 +370,7 @@
       # Post-install: wrap the release binary to include runtime deps
       postInstall = ''
         wrapProgram $out/bin/mydia \
-          --prefix PATH : ${pkgs.lib.makeBinPath [pkgs.ffmpeg_6-headless pkgs.sqlite]}
+          --prefix PATH : ${pkgs.lib.makeBinPath [pkgs.ffmpeg_6-headless pkgs.sqlite pkgs.postgresql]}
       '';
     };
   };

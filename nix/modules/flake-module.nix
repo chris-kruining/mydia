@@ -137,21 +137,30 @@
       };
 
       database = mkOption {
-        type = types.oneOf [
-          (types.addCheck databaseProviderSqlite (x: x ? type && x.type == "sqlite"))
-          (types.addCheck databaseProviderPostgresql (x: x ? type && x.type == "postgresql"))
-        ];
+        type = types.submodule {
+          options = {
+            type = mkOption {
+              type = types.enum ["sqlite" "postgres"];
+              default = "sqlite";
+              description = ''
+                Which database type to use.
+              '';
+            };
+
+            uri = mkOption {
+              type = types.str;
+              default = "file:${cfg.dataDir}/mydia.db";
+              description = ''
+                How to reach the database
+              '';
+            };
+          };
+        };
         default = {
           type = "sqlite";
-          path = "/var/lib/mydia/mydia.db";
+          uri = "file:/var/lib/mydia/mydia.db";
         };
         description = '''';
-      };
-
-      databasePath = mkOption {
-        type = types.path;
-        default = "/var/lib/mydia/mydia.db";
-        description = "Path to the SQLite database file";
       };
 
       dataDir = mkOption {
@@ -302,7 +311,7 @@
         wantedBy = ["multi-user.target"];
         after =
           ["network.target"]
-          ++ lib.optional (config.services.mydia.database.type == "postgresql") "postgres.target";
+          ++ lib.optional (config.services.mydia.database.type == "postgres") "postgres.target";
 
         environment =
           {
@@ -310,11 +319,13 @@
             PHX_HOST = cfg.host;
             PHX_IP = cfg.listenAddress;
             PHX_SERVER = "true";
-            DATABASE_PATH = cfg.databasePath;
             LOG_LEVEL = cfg.logLevel;
             RELEASE_COOKIE = "mydia_nixos";
             RELEASE_DISTRIBUTION = "none";
             HOME = cfg.dataDir;
+          }
+          // lib.optionalAttrs (cfg.database.type == "sqlite") {
+            DATABASE_PATH = cfg.database.uri;
           }
           // lib.optionalAttrs cfg.oidc.enable {
             OIDC_ISSUER = cfg.oidc.issuer;
@@ -352,7 +363,7 @@
             fi
 
             # Create database directory if it doesn't exist
-            mkdir -p "$(dirname "${cfg.databasePath}")"
+            mkdir -p "$(dirname "${cfg.database.uri}")"
 
             # Run migrations
             ${cfg.package}/bin/mydia eval "Ecto.Migrator.run(Mydia.Repo, :up, all: true)"
@@ -463,6 +474,17 @@
           StateDirectory = "mydia";
           StateDirectoryMode = "0750";
         };
+      };
+
+      services.postgresql = mkIf (cfg.database.type == "postgres") {
+        enable = true;
+        ensureDatabases = ["mydia"];
+        ensureUsers = [
+          {
+            name = "mydia";
+            ensureDBOwnership = true;
+          }
+        ];
       };
 
       # Create user and group
