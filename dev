@@ -60,6 +60,7 @@ ${YELLOW}Container Commands:${NC}
 
 ${YELLOW}Development Commands:${NC}
   test [args]          Run tests (mix test)
+  feature-test [args]  Run Wallaby browser tests
   format               Format code (mix format)
   deps.get             Install dependencies
   ecto.migrate         Run database migrations
@@ -77,6 +78,7 @@ ${YELLOW}Examples:${NC}
   ./dev logs -f                  # Follow logs
   ./dev shell                    # Open interactive shell
   ./dev mix test                 # Run tests
+  ./dev feature-test             # Run Wallaby browser tests
   ./dev mix ecto.migrate         # Run migrations
   ./dev exec app mix phx.routes  # Show Phoenix routes
 
@@ -126,6 +128,11 @@ case "$COMMAND" in
     test)
         echo -e "${GREEN}Running tests...${NC}"
         docker compose run --rm -e MIX_ENV=test "$SERVICE_NAME" sh -c 'mix ecto.create --quiet && mix ecto.migrate --quiet && mix test '"$*"
+        ;;
+
+    feature-test)
+        echo -e "${GREEN}Running feature tests (Wallaby browser tests)...${NC}"
+        docker compose run --rm -e MIX_ENV=test "$SERVICE_NAME" ./scripts/run-feature-tests.sh "$@"
         ;;
 
     format)
