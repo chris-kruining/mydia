@@ -67,6 +67,14 @@ ${YELLOW}Development Commands:${NC}
   ecto.reset           Reset database
   phx.server           Start Phoenix server
 
+${YELLOW}User Management:${NC}
+  user list [--role=R] List all users (optionally filter by role)
+  user add <email> <username> [opts]
+                       Add a new user (--password, --role, --display-name)
+  user delete <id>     Delete a user by email or username
+  user reset-password <id> [--password=P]
+                       Reset a user's password
+
 ${YELLOW}Docker Compose Commands:${NC}
   exec <service> <cmd> Execute command in running service
   run <service> <cmd>  Run one-off command in new container
@@ -81,6 +89,9 @@ ${YELLOW}Examples:${NC}
   ./dev feature-test             # Run Wallaby browser tests
   ./dev mix ecto.migrate         # Run migrations
   ./dev exec app mix phx.routes  # Show Phoenix routes
+  ./dev user list                # List all users
+  ./dev user add me@example.com myuser --password=secret123 --role=admin
+  ./dev user reset-password admin --password=newpassword
 
 Any other command will be forwarded directly to docker compose.
 
@@ -88,9 +99,20 @@ EOF
     exit 0
 fi
 
-# Helper function to run commands in an ephemeral container
+# Check if the app container is running
+is_container_running() {
+    docker compose ps --status=running --format '{{.Service}}' 2>/dev/null | grep -q "^${SERVICE_NAME}$"
+}
+
+# Helper function to run commands - uses exec if container is running, otherwise run
 run_in_container() {
-    docker compose run --rm "$SERVICE_NAME" "$@"
+    if is_container_running; then
+        # Use exec for faster execution when container is already running
+        docker compose exec "$SERVICE_NAME" "$@"
+    else
+        # Use run for ephemeral containers when nothing is running
+        docker compose run --rm "$SERVICE_NAME" "$@"
+    fi
 }
 
 # Parse command
@@ -158,6 +180,16 @@ case "$COMMAND" in
     phx.server)
         echo -e "${GREEN}Starting Phoenix server...${NC}"
         run_in_container mix phx.server
+        ;;
+
+    # User management
+    user)
+        if [ $# -eq 0 ]; then
+            echo -e "${RED}Error: user command requires a subcommand${NC}"
+            echo "Usage: ./dev user <list|add|delete|reset-password> [args...]"
+            exit 1
+        fi
+        run_in_container mix mydia.user "$@"
         ;;
 
     # Forward everything else to docker compose

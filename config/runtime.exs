@@ -282,10 +282,15 @@ oidc_client_id = System.get_env("OIDC_CLIENT_ID")
 oidc_client_secret = System.get_env("OIDC_CLIENT_SECRET")
 
 if oidc_issuer && oidc_client_id && oidc_client_secret do
+  # Only log OIDC configuration in non-CLI mode
+  cli_mode? = System.get_env("MYDIA_CLI_MODE") == "true"
   require Logger
-  Logger.info("Configuring Ueberauth with OIDC for production")
-  Logger.info("Issuer: #{oidc_issuer}")
-  Logger.info("Client ID: #{oidc_client_id}")
+
+  unless cli_mode? do
+    Logger.info("Configuring Ueberauth with OIDC for production")
+    Logger.info("Issuer: #{oidc_issuer}")
+    Logger.info("Client ID: #{oidc_client_id}")
+  end
 
   # Configure oidcc library settings
   config :oidcc, :provider_configuration_opts, %{request_opts: %{transport_opts: []}}
@@ -316,7 +321,7 @@ if oidc_issuer && oidc_client_id && oidc_client_secret do
          ]}
     ]
 
-  Logger.info("Ueberauth OIDC configured successfully!")
+  unless cli_mode?, do: Logger.info("Ueberauth OIDC configured successfully!")
 else
   require Logger
   Logger.info("OIDC not configured - missing environment variables")

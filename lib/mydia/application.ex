@@ -5,8 +5,13 @@ defmodule Mydia.Application do
 
   use Application
 
+  # Check if running in CLI mode (quiet startup)
+  defp cli_mode?, do: System.get_env("MYDIA_CLI_MODE") == "true"
+
   @impl true
   def start(_type, _args) do
+    # Suppress logger output in CLI mode
+    if cli_mode?(), do: Logger.configure(level: :error)
     # Load and validate configuration at startup
     config = load_config!()
 
@@ -48,6 +53,8 @@ defmodule Mydia.Application do
     opts = [strategy: :one_for_one, name: Mydia.Supervisor]
 
     with {:ok, pid} <- Supervisor.start_link(children, opts) do
+      # Attach Oban job broadcaster for real-time job status updates
+      Mydia.Jobs.Broadcaster.attach()
       # Register download client adapters after supervisor has started
       Mydia.Downloads.register_clients()
       # Register indexer adapters after supervisor has started
@@ -179,7 +186,7 @@ defmodule Mydia.Application do
   defp ensure_default_quality_profiles do
     case Mydia.Settings.ensure_default_quality_profiles() do
       {:ok, count} when count > 0 ->
-        IO.puts("✓ Created #{count} default quality profile(s)")
+        unless cli_mode?(), do: IO.puts("✓ Created #{count} default quality profile(s)")
 
       {:ok, 0} ->
         :ok
@@ -229,26 +236,28 @@ defmodule Mydia.Application do
         status == :warning
       end)
 
-    if errors != [] do
-      IO.puts("\n⚠️  Library Path Validation Errors:")
+    unless cli_mode?() do
+      if errors != [] do
+        IO.puts("\n⚠️  Library Path Validation Errors:")
 
-      Enum.each(errors, fn {:error, path, media_type, reason} ->
-        IO.puts("  ✗ #{media_type} path '#{path}': #{reason}")
-      end)
+        Enum.each(errors, fn {:error, path, media_type, reason} ->
+          IO.puts("  ✗ #{media_type} path '#{path}': #{reason}")
+        end)
 
-      IO.puts("\nPlease fix these paths in your configuration file or environment variables.")
-    end
+        IO.puts("\nPlease fix these paths in your configuration file or environment variables.")
+      end
 
-    if warnings != [] do
-      IO.puts("\n⚠️  Library Path Validation Warnings:")
+      if warnings != [] do
+        IO.puts("\n⚠️  Library Path Validation Warnings:")
 
-      Enum.each(warnings, fn {:warning, path, media_type, reason} ->
-        IO.puts("  ! #{media_type} path '#{path}': #{reason}")
-      end)
-    end
+        Enum.each(warnings, fn {:warning, path, media_type, reason} ->
+          IO.puts("  ! #{media_type} path '#{path}': #{reason}")
+        end)
+      end
 
-    if errors == [] and warnings == [] and paths_to_validate != [] do
-      IO.puts("✓ All library paths validated successfully")
+      if errors == [] and warnings == [] and paths_to_validate != [] do
+        IO.puts("✓ All library paths validated successfully")
+      end
     end
 
     # Return validation status
@@ -288,7 +297,7 @@ defmodule Mydia.Application do
         :ok
 
       {:ok, count} ->
-        IO.puts("✓ Cleaned up #{count} stale HLS session directory(ies)")
+        unless cli_mode?(), do: IO.puts("✓ Cleaned up #{count} stale HLS session directory(ies)")
 
       {:error, _reason} ->
         # Don't fail startup on cleanup errors
