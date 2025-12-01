@@ -197,6 +197,32 @@ defmodule Mydia.Jobs do
   end
 
   @doc """
+  Resets stale executing jobs to available state.
+
+  Jobs can get stuck in "executing" state if the application restarts while
+  jobs are running. This function finds jobs that have been executing for
+  longer than the specified timeout and resets them to "available" so they
+  can be retried.
+
+  ## Options
+  - `:timeout_minutes` - Consider jobs stale after this many minutes (default: 60)
+
+  Returns `{:ok, count}` where count is the number of jobs reset.
+  """
+  def reset_stale_executing_jobs(opts \\ []) do
+    timeout_minutes = Keyword.get(opts, :timeout_minutes, 60)
+    cutoff = DateTime.utc_now() |> DateTime.add(-timeout_minutes * 60, :second)
+
+    {count, _} =
+      from(j in Job,
+        where: j.state == "executing" and j.attempted_at < ^cutoff
+      )
+      |> Repo.update_all(set: [state: "available", attempted_at: nil, attempted_by: nil])
+
+    {:ok, count}
+  end
+
+  @doc """
   Counts total jobs in history for pagination.
   """
   def count_job_history(opts \\ []) do

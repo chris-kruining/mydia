@@ -53,6 +53,8 @@ defmodule Mydia.Application do
     opts = [strategy: :one_for_one, name: Mydia.Supervisor]
 
     with {:ok, pid} <- Supervisor.start_link(children, opts) do
+      # Reset any jobs stuck in executing state from previous runs
+      reset_stale_jobs()
       # Attach Oban job broadcaster for real-time job status updates
       Mydia.Jobs.Broadcaster.attach()
       # Register download client adapters after supervisor has started
@@ -302,6 +304,22 @@ defmodule Mydia.Application do
       {:error, _reason} ->
         # Don't fail startup on cleanup errors
         :ok
+    end
+  end
+
+  defp reset_stale_jobs do
+    # Only reset stale jobs if Oban is configured to run
+    oban_config = Application.get_env(:mydia, Oban, [])
+
+    if Keyword.get(oban_config, :testing) != :manual and
+         Keyword.get(oban_config, :queues) != false do
+      case Mydia.Jobs.reset_stale_executing_jobs() do
+        {:ok, 0} ->
+          :ok
+
+        {:ok, count} ->
+          unless cli_mode?(), do: IO.puts("✓ Reset #{count} stale job(s) to available state")
+      end
     end
   end
 end
