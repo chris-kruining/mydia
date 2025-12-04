@@ -89,6 +89,15 @@
                 How to reach the database
               '';
             };
+
+            passwordFile = mkOption {
+              type = types.nullOr types.path;
+              default = null;
+              description = ''
+                Path to a file containing the password for the database.
+              '';
+              example = "/run/secrets/mydia/postgres_password";
+            };
           };
         };
         default = {
@@ -241,30 +250,26 @@
     };
 
     config = mkIf cfg.enable {
-      warnings =
-        []
-        ++ lib.optionalString (cfg.database.type == "postgres" && dbUrl.password != null) [
-          ''
-            Passing the password via the URL is strongly discouraged.
-            As this would expose your password in both your git,
-            as well as in the nix store on the target machine.
+      warnings = [
+        (mkIf (cfg.database.type == "postgres" && dbUrl?password && dbUrl.password != null) ''
+          Passing the password via the URL is strongly discouraged.
+          As this would expose your password in both your git,
+          as well as in the nix store on the target machine.
 
-            Instead we recommend you instead use sops-nix/agenix to manage the password for you.
-          ''
-        ];
+          Instead we recommend you instead use sops-nix/agenix to manage the password for you.
+        '')
+      ];
 
-      # assertions = [
-      #   {
-      #     assertion = cfg.database.type == "postgres" -> dbUrl.password == null;
-      #     message = ''
-      #       Passing the password via the URL is strongly discouraged.
-      #       As this would expose your password in both your git,
-      #       as well as in the nix store on the target machine.
-
-      #       Instead we recommend you instead use sops-nix/agenix to manage the password for you.
-      #     '';
-      #   }
-      # ];
+      assertions = [
+        {
+          assertion = cfg.database.type == "postgres" -> cfg.database.passwordFile != null || (dbUrl?password && dbUrl.password != null);
+          message = ''
+            The password for postgres is required,
+            either set it with `config.services.mydia.database.passwordFile`,
+            or as the password parameter in the URL (not recommended).
+          '';
+        }
+      ];
 
       systemd.services.mydia = {
         description = "Mydia Media Manager";
@@ -411,6 +416,8 @@
             ["SECRET_KEY_BASE:${cfg.secretKeyBaseFile}"]
             ++ optional (cfg.guardianSecretKeyFile != null)
             "GUARDIAN_SECRET_KEY:${cfg.guardianSecretKeyFile}"
+            ++ optional (cfg.database.passwordFile != null)
+            "DATABASE_PASSWORD:${cfg.database.passwordFile}"
             ++ optionals cfg.oidc.enable [
               "OIDC_CLIENT_ID:${cfg.oidc.clientIdFile}"
               "OIDC_CLIENT_SECRET:${cfg.oidc.clientSecretFile}"

@@ -3,7 +3,7 @@
     checks.mydia = pkgs.testers.runNixOSTest {
       name = "mydia";
 
-      nodes.machine1 = {
+      nodes.machine1 = {config, ...}: {
         imports = [self.nixosModules.default];
 
         config = {
@@ -15,7 +15,8 @@
 
               database = {
                 type = "postgres";
-                uri = "postgres://localhost/mydia?sslmode=disabled";
+                uri = "postgres://mydia@localhost/mydia?sslmode=disabled";
+                passwordFile = "/run/secrets/mydia/database_password";
               };
             };
           };
