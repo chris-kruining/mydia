@@ -275,6 +275,7 @@
             DATABASE_NAME = (url.path or "/mydia") |> lib.substring 1 (-1) |> lib.splitString "/" |> lib.head;
             DATABASE_USER = url.user or "mydia";
             DATABASE_PASSWORD = url.password or "mydia";
+            DATABASE_SSL_MODE = url.queryParams.sslmode or "verify";
           })
           // lib.optionalAttrs cfg.oidc.enable {
             OIDC_ISSUER = cfg.oidc.issuer;

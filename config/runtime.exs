@@ -43,6 +43,7 @@ if config_env() == :prod do
         username: System.get_env("DATABASE_USER") || "postgres",
         password: System.get_env("DATABASE_PASSWORD"),
         pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+        ssl: (if System.get_env("DATABASE_SSL_MODE") == "disable", do: false, else: ""),
         # Increased timeout to handle long-running library scans (60 seconds)
         timeout: 60_000
 
