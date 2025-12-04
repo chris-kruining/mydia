@@ -303,23 +303,25 @@
           WorkingDirectory = cfg.dataDir;
 
           # Run migrations before starting
-          ExecStartPre = pkgs.writeShellScript "mydia-migrate" ''
-            set -euo pipefail
+          ExecStartPre = [
+            (pkgs.writeShellScript "mydia-migrate" ''
+              set -euo pipefail
 
-            # Load secrets
-            if [ -f "$CREDENTIALS_DIRECTORY/SECRET_KEY_BASE" ]; then
-              export SECRET_KEY_BASE=$(cat "$CREDENTIALS_DIRECTORY/SECRET_KEY_BASE")
-            fi
-            if [ -f "$CREDENTIALS_DIRECTORY/GUARDIAN_SECRET_KEY" ]; then
-              export GUARDIAN_SECRET_KEY=$(cat "$CREDENTIALS_DIRECTORY/GUARDIAN_SECRET_KEY")
-            fi
+              # Load secrets
+              if [ -f "$CREDENTIALS_DIRECTORY/SECRET_KEY_BASE" ]; then
+                export SECRET_KEY_BASE=$(cat "$CREDENTIALS_DIRECTORY/SECRET_KEY_BASE")
+              fi
+              if [ -f "$CREDENTIALS_DIRECTORY/GUARDIAN_SECRET_KEY" ]; then
+                export GUARDIAN_SECRET_KEY=$(cat "$CREDENTIALS_DIRECTORY/GUARDIAN_SECRET_KEY")
+              fi
 
-            # Create database directory if it doesn't exist
-            mkdir -p "$(dirname "${cfg.database.uri}")"
+              # Create database directory if it doesn't exist
+              mkdir -p "$(dirname "${cfg.database.uri}")"
 
-            # Run migrations
-            ${cfg.package}/bin/mydia eval "Ecto.Migrator.run(Mydia.Repo, :up, all: true)"
-          '';
+              # Run migrations
+              ${cfg.package}/bin/mydia eval "Ecto.Migrator.run(Mydia.Repo, :up, all: true)"
+            '')
+          ];
 
           ExecStart = let
             # Build credential loading script
