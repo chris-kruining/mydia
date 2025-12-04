@@ -272,10 +272,7 @@
             DATABASE_TYPE = "postgres";
             DATABASE_HOST = url.hostName;
             DATABASE_PORT = toString url.port;
-            DATABASE_NAME =
-              if url?path
-              then url.path |> lib.splitString "/" |> lib.head
-              else "mydia";
+            DATABASE_NAME = (url.path or "/mydia") |> lib.substring 1 (-1) |> lib.splitString "/" |> lib.head;
             DATABASE_USER = url.user or "mydia";
             DATABASE_PASSWORD = url.password or "mydia";
           })
